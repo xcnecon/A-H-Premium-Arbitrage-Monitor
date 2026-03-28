@@ -9,7 +9,6 @@ Sources (in priority order):
 
 import logging
 from datetime import date, datetime
-from typing import Optional
 
 import pandas as pd
 import requests
@@ -25,6 +24,7 @@ _TIMEOUT = 10
 
 
 # ─── Source 1: Yahoo Finance (HKDCNH=X) ───
+
 
 def _yahoo_fx_history(start: str, end: str) -> pd.DataFrame:
     """Fetch daily HKD→CNH from Yahoo Finance v8 chart API.
@@ -45,16 +45,18 @@ def _yahoo_fx_history(start: str, end: str) -> pd.DataFrame:
     timestamps = data["timestamp"]
     closes = data["indicators"]["quote"][0]["close"]
     rows = []
-    for ts, c in zip(timestamps, closes):
+    for ts, c in zip(timestamps, closes, strict=False):
         if c is not None:
-            rows.append({
-                "date": datetime.utcfromtimestamp(ts).date(),
-                "rate": round(c, 6),
-            })
+            rows.append(
+                {
+                    "date": datetime.utcfromtimestamp(ts).date(),
+                    "rate": round(c, 6),
+                }
+            )
     return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
 
 
-def _yahoo_fx_latest() -> Optional[float]:
+def _yahoo_fx_latest() -> float | None:
     """Fetch latest HKD→CNH from Yahoo Finance."""
     url = "https://query1.finance.yahoo.com/v8/finance/chart/HKDCNH%3DX"
     resp = _SESSION.get(url, params={"range": "5d", "interval": "1d"}, timeout=_TIMEOUT)
@@ -69,10 +71,12 @@ def _yahoo_fx_latest() -> Optional[float]:
 
 # ─── Source 2: AKShare fx_spot_quote (live fallback) ───
 
-def _akshare_fx_spot() -> Optional[float]:
+
+def _akshare_fx_spot() -> float | None:
     """Fetch live HKD/CNH spot from AKShare."""
     try:
         import akshare as ak
+
         df = ak.fx_spot_quote()
         if df is None or df.empty:
             return None
@@ -92,6 +96,7 @@ def _akshare_fx_spot() -> Optional[float]:
 
 
 # ─── Public API ───
+
 
 def get_fx_latest() -> float:
     """Get the latest CNH-per-HKD rate.
@@ -124,6 +129,7 @@ def get_fx_latest() -> float:
 
     # 3. Any cached value at all
     from src.storage.db import get_fx_range_cached
+
     recent = get_fx_range_cached("2020-01-01", today.isoformat())
     if not recent.empty and "rate" in recent.columns:
         rate = recent.iloc[-1]["rate"]

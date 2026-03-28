@@ -5,7 +5,6 @@ Uses raw httpx for synchronous HTTP — no event loop conflicts with Streamlit.
 
 import logging
 import time
-from typing import Optional
 
 import httpx
 
@@ -16,11 +15,13 @@ logger = logging.getLogger(__name__)
 _API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 
 
-def send_alert(text: str,
-               chat_id: Optional[str] = None,
-               parse_mode: str = "HTML",
-               disable_notification: bool = False,
-               max_retries: int = 3) -> bool:
+def send_alert(
+    text: str,
+    chat_id: str | None = None,
+    parse_mode: str = "HTML",
+    disable_notification: bool = False,
+    max_retries: int = 3,
+) -> bool:
     """Send a Telegram alert message.
 
     Args:
@@ -71,34 +72,41 @@ def send_alert(text: str,
 
             # Permanent failures — do not retry
             if error_code in (400, 401, 403):
-                logger.error("Telegram error %s: %s",
-                             error_code, data.get("description"))
+                logger.error("Telegram error %s: %s", error_code, data.get("description"))
                 return False
 
-            logger.warning("Telegram error %s (attempt %s/%s): %s",
-                           error_code, attempt + 1, max_retries,
-                           data.get("description"))
+            logger.warning(
+                "Telegram error %s (attempt %s/%s): %s",
+                error_code,
+                attempt + 1,
+                max_retries,
+                data.get("description"),
+            )
 
         except httpx.TimeoutException:
-            logger.warning("Telegram timeout (attempt %s/%s)",
-                           attempt + 1, max_retries)
+            logger.warning("Telegram timeout (attempt %s/%s)", attempt + 1, max_retries)
         except httpx.HTTPError as exc:
-            logger.warning("Telegram HTTP error (attempt %s/%s): %s",
-                           attempt + 1, max_retries, exc)
+            logger.warning("Telegram HTTP error (attempt %s/%s): %s", attempt + 1, max_retries, exc)
 
         if attempt < max_retries - 1:
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
 
     logger.error("Telegram alert failed after %s retries", max_retries)
     return False
 
 
-def format_premium_alert(name: str, hk_code: str, a_code: str,
-                         premium_pct: float, threshold: float,
-                         direction: str,
-                         a_price: float, h_price: float,
-                         fx_rate: float,
-                         daily_chg: Optional[float] = None) -> str:
+def format_premium_alert(
+    name: str,
+    hk_code: str,
+    a_code: str,
+    premium_pct: float,
+    threshold: float,
+    direction: str,
+    a_price: float,
+    h_price: float,
+    fx_rate: float,
+    daily_chg: float | None = None,
+) -> str:
     """Format an A/H premium alert message in HTML.
 
     Args:
@@ -126,11 +134,9 @@ def format_premium_alert(name: str, hk_code: str, a_code: str,
     # Crossover direction indicators
     if direction == "cross_up":
         emoji = "\U0001f4c8"  # chart increasing
-        dir_text = "上穿"
         cross_text = f"上穿 {threshold:+.1f}%"
     else:
         emoji = "\U0001f4c9"  # chart decreasing
-        dir_text = "下穿"
         cross_text = f"下穿 {threshold:+.1f}%"
 
     # Severity

@@ -1,9 +1,8 @@
 import logging
 import time
-from datetime import datetime
 
-import pandas as pd
 import akshare as ak
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,7 @@ def get_a_kline(code: str, start: str, end: str, adjust: str = "") -> pd.DataFra
         symbol=symbol,
         start_date=start.replace("-", ""),
         end_date=end.replace("-", ""),
-        adjust=adjust
+        adjust=adjust,
     )
     if df is None or df.empty:
         logger.warning("No A-share data for %s", code)

@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 _PAIRS_FILE = Path(__file__).parent / "ah_pairs.json"
 
 try:
-    with open(_PAIRS_FILE, "r", encoding="utf-8") as f:
+    with open(_PAIRS_FILE, encoding="utf-8") as f:
         _AH_PAIRS: dict[str, dict[str, str]] = json.load(f)
     logger.info("Loaded %d A/H pairs from %s", len(_AH_PAIRS), _PAIRS_FILE)
 except FileNotFoundError:

@@ -7,24 +7,29 @@ Two sync modes:
     watchlist) to build today's K-line bar. Zero historical quota consumed.
 """
 
+import contextlib
 import logging
-import time
 import threading
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
-from typing import Any, Callable, Optional
+from typing import Any
 
 import pandas as pd
-from futu import OpenQuoteContext, KLType, AuType, RET_OK
+from futu import RET_OK, AuType, KLType, OpenQuoteContext
 
-from src.config.settings import OPEND_HOST, OPEND_PORT, DEFAULT_FX_RATE, SYNC_H_WORKERS
+from src.config.settings import DEFAULT_FX_RATE, OPEND_HOST, OPEND_PORT, SYNC_H_WORKERS
 from src.data.ah_mapping import get_all_pairs
 from src.data.akshare_client import get_a_kline
 from src.data.fx_client import get_fx_latest, get_fx_range
-from src.data.realtime import get_h_snapshots_batch, get_a_snapshots_batch
+from src.data.realtime import get_a_snapshots_batch
 from src.storage.kline_cache import (
-    save_kline, load_kline, get_last_sync_date, update_sync_meta,
+    get_last_sync_date,
+    load_kline,
+    save_kline,
     save_premium_daily,
+    update_sync_meta,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,7 +39,7 @@ _A_DELAY: float = 1.0
 
 
 def sync_all(
-    progress_cb: Optional[Callable[[str, int, int], None]] = None,
+    progress_cb: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Download missing K-line data for all A/H pairs and compute premium.
 
@@ -55,11 +60,11 @@ def sync_all(
     errors: list[str] = []
 
     # Classify each pair into: first-time / gap-fill / today-only / up-to-date
-    need_full_h: list[str] = []       # never synced H → full history download
-    need_full_a: list[str] = []       # never synced A → full history download
-    need_gap_h: list[str] = []        # synced but missed days → historical delta
-    need_gap_a: list[str] = []        # synced but missed days → historical delta
-    need_today: list[str] = []        # only missing today → snapshot (zero quota)
+    need_full_h: list[str] = []  # never synced H → full history download
+    need_full_a: list[str] = []  # never synced A → full history download
+    need_gap_h: list[str] = []  # synced but missed days → historical delta
+    need_gap_a: list[str] = []  # synced but missed days → historical delta
+    need_today: list[str] = []  # only missing today → snapshot (zero quota)
 
     yesterday_str = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -85,18 +90,35 @@ def sync_all(
         elif last_a < yesterday_str:
             need_gap_a.append(hk)
 
-    skipped = len(pairs) - len(need_full_h) - len(need_gap_h) - len(need_today) - len(need_full_a) - len(need_gap_a)
+    skipped = (
+        len(pairs)
+        - len(need_full_h)
+        - len(need_gap_h)
+        - len(need_today)
+        - len(need_full_a)
+        - len(need_gap_a)
+    )
     logger.info(
         "Sync classification: full_h=%d gap_h=%d full_a=%d gap_a=%d today=%d skipped≈%d",
-        len(need_full_h), len(need_gap_h), len(need_full_a), len(need_gap_a),
-        len(need_today), skipped,
+        len(need_full_h),
+        len(need_gap_h),
+        len(need_full_a),
+        len(need_gap_a),
+        len(need_today),
+        skipped,
     )
 
     # Nothing to do? Exit early.
     if not need_full_h and not need_gap_h and not need_full_a and not need_gap_a and not need_today:
         logger.info("All pairs up to date, nothing to sync")
-        return {"total_pairs": len(pairs), "h_fetched": 0, "a_fetched": 0,
-                "premium_computed": 0, "errors": [], "elapsed_s": 0.0}
+        return {
+            "total_pairs": len(pairs),
+            "h_fetched": 0,
+            "a_fetched": 0,
+            "premium_computed": 0,
+            "errors": [],
+            "elapsed_s": 0.0,
+        }
 
     h_count = 0
     a_count = 0
@@ -109,7 +131,10 @@ def sync_all(
             progress_cb(f"Downloading H-share history ({len(all_hist_h)})...", 0, len(all_hist_h))
         h_count += _sync_h_klines_hist(
             {hk: pairs[hk] for hk in all_hist_h},
-            default_start, today_str, progress_cb, errors,
+            default_start,
+            today_str,
+            progress_cb,
+            errors,
         )
 
     if all_hist_a:
@@ -117,7 +142,10 @@ def sync_all(
             progress_cb(f"Downloading A-share history ({len(all_hist_a)})...", 0, len(all_hist_a))
         a_count += _sync_a_klines_hist(
             {hk: pairs[hk] for hk in all_hist_a},
-            default_start, today_str, progress_cb, errors,
+            default_start,
+            today_str,
+            progress_cb,
+            errors,
         )
 
     # Phase 2: Today-only update via snapshots (zero historical quota)
@@ -132,7 +160,11 @@ def sync_all(
 
     logger.info(
         "Sync classification: %d full-H, %d gap-H, %d full-A, %d gap-A, %d today-only",
-        len(need_full_h), len(need_gap_h), len(need_full_a), len(need_gap_a), len(need_today),
+        len(need_full_h),
+        len(need_gap_h),
+        len(need_full_a),
+        len(need_gap_a),
+        len(need_today),
     )
 
     # Phase 3: FX rates + recompute premium (only for new data)
@@ -192,15 +224,19 @@ def _sync_today_from_snapshots(
         # H-share snapshot → kline row
         h = h_snaps.get(hk)
         if h and h.get("price", 0) > 0:
-            df_h = pd.DataFrame([{
-                "date": today_str,
-                "open": h.get("open", h["price"]),
-                "high": h.get("high", h["price"]),
-                "low": h.get("low", h["price"]),
-                "close": h["price"],
-                "volume": h.get("volume", 0),
-                "turnover": h.get("turnover", 0),
-            }])
+            df_h = pd.DataFrame(
+                [
+                    {
+                        "date": today_str,
+                        "open": h.get("open", h["price"]),
+                        "high": h.get("high", h["price"]),
+                        "low": h.get("low", h["price"]),
+                        "close": h["price"],
+                        "volume": h.get("volume", 0),
+                        "turnover": h.get("turnover", 0),
+                    }
+                ]
+            )
             save_kline(hk, "H", df_h)
             update_sync_meta(hk, "H", today_str)
 
@@ -209,25 +245,33 @@ def _sync_today_from_snapshots(
             if a and a.get("price", 0) > 0:
                 ratio = (h["price"] * fx) / a["price"]
                 h_turnover_cny = h.get("turnover", 0) * fx
-                df_prem = pd.DataFrame([{
-                    "date": today_str,
-                    "ratio_close": ratio,
-                    "a_turnover": a.get("turnover", 0),
-                    "h_turnover": h_turnover_cny,
-                    "fx_rate": fx,
-                }])
+                df_prem = pd.DataFrame(
+                    [
+                        {
+                            "date": today_str,
+                            "ratio_close": ratio,
+                            "a_turnover": a.get("turnover", 0),
+                            "h_turnover": h_turnover_cny,
+                            "fx_rate": fx,
+                        }
+                    ]
+                )
                 save_premium_daily(hk, df_prem)
 
                 # Save A-share kline too
-                df_a = pd.DataFrame([{
-                    "date": today_str,
-                    "open": a.get("open", a["price"]),
-                    "high": a.get("high", a["price"]),
-                    "low": a.get("low", a["price"]),
-                    "close": a["price"],
-                    "volume": a.get("volume", 0),
-                    "turnover": a.get("turnover", 0),
-                }])
+                df_a = pd.DataFrame(
+                    [
+                        {
+                            "date": today_str,
+                            "open": a.get("open", a["price"]),
+                            "high": a.get("high", a["price"]),
+                            "low": a.get("low", a["price"]),
+                            "close": a["price"],
+                            "volume": a.get("volume", 0),
+                            "turnover": a.get("turnover", 0),
+                        }
+                    ]
+                )
                 save_kline(a_code, "A", df_a)
                 update_sync_meta(a_code, "A", today_str)
 
@@ -241,7 +285,7 @@ def _sync_h_klines_hist(
     pairs: dict[str, dict[str, str]],
     default_start: str,
     today_str: str,
-    progress_cb: Optional[Callable[[str, int, int], None]],
+    progress_cb: Callable[[str, int, int], None] | None,
     errors: list[str],
 ) -> int:
     """Fetch H-share K-lines via Futu — multithreaded with per-thread connections."""
@@ -286,9 +330,13 @@ def _sync_h_klines_hist(
             page_req_key = None
             while True:
                 ret, data, page_req_key = ctx.request_history_kline(
-                    futu_code, start=start, end=today_str,
-                    ktype=KLType.K_DAY, autype=AuType.NONE,
-                    max_count=500, page_req_key=page_req_key,
+                    futu_code,
+                    start=start,
+                    end=today_str,
+                    ktype=KLType.K_DAY,
+                    autype=AuType.NONE,
+                    max_count=500,
+                    page_req_key=page_req_key,
                 )
                 if ret != RET_OK:
                     logger.warning("Futu kline failed for %s: %s", hk, str(data)[:100])
@@ -301,15 +349,17 @@ def _sync_h_klines_hist(
 
             if all_data:
                 raw = pd.concat(all_data, ignore_index=True)
-                df = pd.DataFrame({
-                    "date": pd.to_datetime(raw["time_key"]).dt.strftime("%Y-%m-%d"),
-                    "open": raw["open"],
-                    "high": raw["high"],
-                    "low": raw["low"],
-                    "close": raw["close"],
-                    "volume": raw["volume"].astype(int),
-                    "turnover": raw["turnover"],
-                })
+                df = pd.DataFrame(
+                    {
+                        "date": pd.to_datetime(raw["time_key"]).dt.strftime("%Y-%m-%d"),
+                        "open": raw["open"],
+                        "high": raw["high"],
+                        "low": raw["low"],
+                        "close": raw["close"],
+                        "volume": raw["volume"].astype(int),
+                        "turnover": raw["turnover"],
+                    }
+                )
                 saved = save_kline(hk, "H", df)
                 if saved > 0:
                     max_date = df["date"].max()
@@ -335,10 +385,8 @@ def _sync_h_klines_hist(
                 count += future.result()
     finally:
         for ctx in _contexts:
-            try:
+            with contextlib.suppress(Exception):
                 ctx.close()
-            except Exception:
-                pass
 
     return count
 
@@ -347,7 +395,7 @@ def _sync_a_klines_hist(
     pairs: dict[str, dict[str, str]],
     default_start: str,
     today_str: str,
-    progress_cb: Optional[Callable[[str, int, int], None]],
+    progress_cb: Callable[[str, int, int], None] | None,
     errors: list[str],
 ) -> int:
     """Fetch A-share K-lines via AKShare/Tencent — multithreaded."""

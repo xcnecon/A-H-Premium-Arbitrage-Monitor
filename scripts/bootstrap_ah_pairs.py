@@ -150,7 +150,6 @@ RAW_PAIRS: list[tuple[str, str, str]] = [
     ("01880", "601888", "中国中免"),
     ("02359", "603259", "药明康德"),
     ("06693", "600988", "赤峰黄金"),
-
     # --- Shenzhen Main Board (000xxx) ---
     ("00347", "000898", "鞍钢股份"),
     ("00719", "000756", "新华制药"),
@@ -160,7 +159,6 @@ RAW_PAIRS: list[tuple[str, str, str]] = [
     ("01812", "000488", "晨鸣纸业"),
     ("02039", "000039", "中集集团"),
     ("02202", "000002", "万科A"),
-
     # --- Shenzhen SME Board (002xxx) ---
     ("00568", "002490", "山东墨龙"),
     ("00895", "002672", "东江环保"),
@@ -181,7 +179,6 @@ RAW_PAIRS: list[tuple[str, str, str]] = [
     ("06936", "002352", "顺丰控股"),
     ("09696", "002466", "天齐锂业"),
     ("09989", "002399", "海普瑞"),
-
     # --- Shenzhen ChiNext (300xxx) ---
     ("00300", "000333", "美的集团"),
     ("00638", "300638", "广和通"),
@@ -189,12 +186,10 @@ RAW_PAIRS: list[tuple[str, str, str]] = [
     ("03759", "300759", "康龙化成"),
     ("06613", "300433", "蓝思科技"),
     ("06680", "300748", "金力永磁"),
-
     # --- Shenzhen Main Board new codes (001xxx, 003xxx) ---
     ("00916", "001289", "龙源电力"),
     ("01816", "003816", "中广核电力"),
     ("03678", "001236", "弘业期货"),
-
     # --- STAR Market / 科创板 (688xxx) ---
     ("00981", "688981", "中芯国际"),
     ("01304", "688279", "峰岹科技"),
@@ -232,7 +227,10 @@ def build_ah_pairs() -> dict[str, dict[str, str]]:
         if hk_code in pairs:
             logger.warning(
                 "Duplicate HK code: %s -> existing=%s, new=(%s, %s)",
-                hk_code, pairs[hk_code], a_code, name,
+                hk_code,
+                pairs[hk_code],
+                a_code,
+                name,
             )
             continue
 
@@ -241,7 +239,10 @@ def build_ah_pairs() -> dict[str, dict[str, str]]:
         if a_code in seen_a_codes:
             logger.info(
                 "A-share code %s appears for both HK:%s and HK:%s (%s)",
-                a_code, seen_a_codes[a_code], hk_code, name,
+                a_code,
+                seen_a_codes[a_code],
+                hk_code,
+                name,
             )
 
         seen_a_codes[a_code] = hk_code
@@ -280,10 +281,12 @@ def main() -> None:
         elif entry["a_code"] != expected_a:
             logger.error(
                 "WRONG A-code for HK:%s: got %s, expected %s",
-                hk, entry['a_code'], expected_a,
+                hk,
+                entry["a_code"],
+                expected_a,
             )
         else:
-            logger.info("OK: HK:%s -> A:%s (%s)", hk, entry['a_code'], entry['name'])
+            logger.info("OK: HK:%s -> A:%s (%s)", hk, entry["a_code"], entry["name"])
 
 
 if __name__ == "__main__":

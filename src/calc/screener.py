@@ -5,11 +5,9 @@ for every pair in the mapping, using live snapshot data and FX rates.
 """
 
 import logging
-from typing import Optional
 
 import pandas as pd
-
-from futu import OpenQuoteContext, RET_OK
+from futu import RET_OK, OpenQuoteContext
 
 from src.config.settings import OPEND_HOST, OPEND_PORT
 from src.data.ah_mapping import get_all_pairs
@@ -19,7 +17,7 @@ from src.data.realtime import get_a_snapshots_batch
 logger = logging.getLogger(__name__)
 
 
-def _safe_premium(h_price: float, a_price: float, fx: float) -> Optional[float]:
+def _safe_premium(h_price: float, a_price: float, fx: float) -> float | None:
     """Compute H-share premium percentage, returning None on bad inputs.
 
     Formula: (H_price * fx / A_price - 1) * 100
@@ -37,9 +35,7 @@ def _safe_premium(h_price: float, a_price: float, fx: float) -> Optional[float]:
     return (h_price * fx / a_price - 1.0) * 100.0
 
 
-def _safe_vol_ratio(
-    h_turnover: float, a_turnover: float, fx: float
-) -> Optional[float]:
+def _safe_vol_ratio(h_turnover: float, a_turnover: float, fx: float) -> float | None:
     """Compute H/A turnover ratio in CNH terms, returning None on bad inputs.
 
     Args:
@@ -57,9 +53,7 @@ def _safe_vol_ratio(
     return (h_turnover * fx) / a_turnover
 
 
-def _fetch_all_h_snapshots(
-    hk_codes: list[str], chunk_size: int = 30
-) -> dict[str, dict]:
+def _fetch_all_h_snapshots(hk_codes: list[str], chunk_size: int = 30) -> dict[str, dict]:
     """Fetch H-share snapshots using ONE Futu connection, chunked to isolate bad codes."""
     ctx = OpenQuoteContext(host=OPEND_HOST, port=OPEND_PORT)
     result: dict[str, dict] = {}
@@ -81,9 +75,7 @@ def _fetch_all_h_snapshots(
                         "turnover": float(row["turnover"]),
                     }
             else:
-                logger.warning(
-                    "Futu chunk %d–%d failed: %s", i, i + len(chunk), str(data)[:100]
-                )
+                logger.warning("Futu chunk %d–%d failed: %s", i, i + len(chunk), str(data)[:100])
     except Exception as e:
         logger.error("Futu screener fetch error: %s", e)
     finally:
@@ -126,7 +118,10 @@ def compute_screener_table() -> pd.DataFrame:
 
     logger.info(
         "Screener snapshots: %d/%d H, %d/%d A",
-        len(h_snaps), len(hk_codes), len(a_snaps), len(a_codes),
+        len(h_snaps),
+        len(hk_codes),
+        len(a_snaps),
+        len(a_codes),
     )
 
     rows: list[dict] = []
@@ -156,7 +151,7 @@ def compute_screener_table() -> pd.DataFrame:
         a_prev = a_snap.get("prev_close", 0)
         prev_premium = _safe_premium(h_prev, a_prev, fx)
 
-        daily_chg: Optional[float] = None
+        daily_chg: float | None = None
         if premium is not None and prev_premium is not None:
             daily_chg = premium - prev_premium
 
@@ -164,18 +159,28 @@ def compute_screener_table() -> pd.DataFrame:
         a_turnover = a_snap.get("turnover", 0)
         vol_ratio = _safe_vol_ratio(h_turnover, a_turnover, fx)
 
-        rows.append({
-            "hk_code": hk_code,
-            "a_code": a_code,
-            "name": name,
-            "premium": round(premium, 2) if premium is not None else None,
-            "daily_chg": round(daily_chg, 2) if daily_chg is not None else None,
-            "vol_ratio": round(vol_ratio, 4) if vol_ratio is not None else None,
-        })
+        rows.append(
+            {
+                "hk_code": hk_code,
+                "a_code": a_code,
+                "name": name,
+                "premium": round(premium, 2) if premium is not None else None,
+                "daily_chg": round(daily_chg, 2) if daily_chg is not None else None,
+                "vol_ratio": round(vol_ratio, 4) if vol_ratio is not None else None,
+            }
+        )
 
-    df = pd.DataFrame(rows, columns=[
-        "hk_code", "a_code", "name", "premium", "daily_chg", "vol_ratio",
-    ])
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "hk_code",
+            "a_code",
+            "name",
+            "premium",
+            "daily_chg",
+            "vol_ratio",
+        ],
+    )
 
     if not df.empty:
         df = df.sort_values("premium", ascending=False, na_position="last")

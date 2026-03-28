@@ -80,10 +80,14 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
 
         if last_side is None:
             # First evaluation — record the side without firing
-            update_alert_state(rule_id, last_side=current_side,
-                               last_premium=premium)
-            logger.info("Alert initialized: %s @ %.1f%% (side=%s, premium=%.2f%%)",
-                        hk_code, threshold, current_side, premium)
+            update_alert_state(rule_id, last_side=current_side, last_premium=premium)
+            logger.info(
+                "Alert initialized: %s @ %.1f%% (side=%s, premium=%.2f%%)",
+                hk_code,
+                threshold,
+                current_side,
+                premium,
+            )
             continue
 
         if current_side == last_side:
@@ -93,17 +97,27 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
 
         # ── CROSSOVER detected ──
         cross_dir = "cross_up" if current_side == "above" else "cross_down"
-        logger.info("CROSSOVER: %s premium %.2f%% crossed %.1f%% (%s)",
-                    hk_code, premium, threshold, cross_dir)
+        logger.info(
+            "CROSSOVER: %s premium %.2f%% crossed %.1f%% (%s)",
+            hk_code,
+            premium,
+            threshold,
+            cross_dir,
+        )
 
         # Always update side first so we don't re-fire on the next tick
-        update_alert_state(rule_id, last_side=current_side,
-                           last_premium=premium)
+        update_alert_state(rule_id, last_side=current_side, last_premium=premium)
 
         if _is_rate_limited():
             logger.warning("Rate limited, skipping notification for %s", hk_code)
-            log_alert_event(rule_id, hk_code, cross_dir, "rate_limited", premium,
-                            detail="threshold=%.1f" % threshold)
+            log_alert_event(
+                rule_id,
+                hk_code,
+                cross_dir,
+                "rate_limited",
+                premium,
+                detail=f"threshold={threshold:.1f}",
+            )
             continue
 
         # Send Telegram notification
@@ -114,10 +128,15 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
         daily_chg = data.get("daily_chg")
 
         msg = format_premium_alert(
-            name=name, hk_code=hk_code, a_code=a_code,
-            premium_pct=premium, threshold=threshold,
-            direction=cross_dir, a_price=a_price,
-            h_price=h_price, fx_rate=fx_rate,
+            name=name,
+            hk_code=hk_code,
+            a_code=a_code,
+            premium_pct=premium,
+            threshold=threshold,
+            direction=cross_dir,
+            a_price=a_price,
+            h_price=h_price,
+            fx_rate=fx_rate,
             daily_chg=daily_chg,
         )
         sent = send_alert(msg)
@@ -125,12 +144,18 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
             _record_send()
 
         event_type = "fired" if sent else "send_failed"
-        log_alert_event(rule_id, hk_code, cross_dir, event_type, premium,
-                        detail="threshold=%.1f" % threshold)
-        events.append({
-            "event": event_type, "hk_code": hk_code,
-            "direction": cross_dir, "premium": premium,
-            "threshold": threshold, "sent": sent,
-        })
+        log_alert_event(
+            rule_id, hk_code, cross_dir, event_type, premium, detail=f"threshold={threshold:.1f}"
+        )
+        events.append(
+            {
+                "event": event_type,
+                "hk_code": hk_code,
+                "direction": cross_dir,
+                "premium": premium,
+                "threshold": threshold,
+                "sent": sent,
+            }
+        )
 
     return events

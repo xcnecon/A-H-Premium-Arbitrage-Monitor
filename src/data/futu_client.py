@@ -1,10 +1,13 @@
 import logging
 from datetime import datetime
+
 import pandas as pd
-from futu import OpenQuoteContext, KLType, AuType, RET_OK
+from futu import RET_OK, AuType, KLType, OpenQuoteContext
+
 from src.config.settings import OPEND_HOST, OPEND_PORT
 
 logger = logging.getLogger(__name__)
+
 
 def get_h_kline(code: str, start: str, end: str, ktype: str = "K_DAY") -> pd.DataFrame:
     """
@@ -34,7 +37,7 @@ def get_h_kline(code: str, start: str, end: str, ktype: str = "K_DAY") -> pd.Dat
                 ktype=kl_type,
                 autype=AuType.NONE,
                 max_count=1000,
-                page_req_key=page_req_key
+                page_req_key=page_req_key,
             )
             if ret != RET_OK:
                 logger.error("Futu request_history_kline failed: %s", data)
@@ -49,15 +52,17 @@ def get_h_kline(code: str, start: str, end: str, ktype: str = "K_DAY") -> pd.Dat
 
         df = pd.concat(all_data, ignore_index=True)
         # Standardize columns
-        df = df.rename(columns={
-            "time_key": "date",
-            "open": "open",
-            "high": "high",
-            "low": "low",
-            "close": "close",
-            "volume": "volume",
-            "turnover": "turnover"
-        })
+        df = df.rename(
+            columns={
+                "time_key": "date",
+                "open": "open",
+                "high": "high",
+                "low": "low",
+                "close": "close",
+                "volume": "volume",
+                "turnover": "turnover",
+            }
+        )
         df["date"] = pd.to_datetime(df["date"]).dt.date
         return df[["date", "open", "high", "low", "close", "volume", "turnover"]]
     except Exception as e:
@@ -105,15 +110,17 @@ def get_h_kline_with_ctx(
         if data.empty:
             return pd.DataFrame()
 
-        df = pd.DataFrame({
-            "date": pd.to_datetime(data["time_key"]).dt.strftime("%Y-%m-%d"),
-            "open": data["open"],
-            "high": data["high"],
-            "low": data["low"],
-            "close": data["close"],
-            "volume": data["volume"].astype(int),
-            "turnover": data["turnover"],
-        })
+        df = pd.DataFrame(
+            {
+                "date": pd.to_datetime(data["time_key"]).dt.strftime("%Y-%m-%d"),
+                "open": data["open"],
+                "high": data["high"],
+                "low": data["low"],
+                "close": data["close"],
+                "volume": data["volume"].astype(int),
+                "turnover": data["turnover"],
+            }
+        )
         return df
     except Exception as e:
         logger.warning("Futu kline (ctx) error for %s: %s", code, e)
@@ -124,6 +131,7 @@ def _fallback_akshare_hk(code: str, start: str, end: str) -> pd.DataFrame:
     """Fallback to AKShare for HK stock data when OpenD unavailable."""
     try:
         import akshare as ak
+
         logger.info("Falling back to AKShare for HK.%s", code)
         df = ak.stock_hk_daily(symbol=code, adjust="qfq")
         if df.empty:
@@ -137,7 +145,8 @@ def _fallback_akshare_hk(code: str, start: str, end: str) -> pd.DataFrame:
         start_d = datetime.strptime(start, "%Y-%m-%d").date()
         end_d = datetime.strptime(end, "%Y-%m-%d").date()
         df = df[(df["date"] >= start_d) & (df["date"] <= end_d)]
-        return df[["date", "open", "high", "low", "close", "volume", "turnover"]].reset_index(drop=True)
+        cols = ["date", "open", "high", "low", "close", "volume", "turnover"]
+        return df[cols].reset_index(drop=True)
     except Exception as e:
         logger.error("AKShare HK fallback also failed: %s", e)
         return pd.DataFrame()

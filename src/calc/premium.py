@@ -1,4 +1,5 @@
 import logging
+
 import pandas as pd
 
 from src.config.settings import DEFAULT_FX_RATE
@@ -56,8 +57,10 @@ def compute_ratio_ohlcv(
 
     # Filter out rows where A-share prices are zero (would cause division by zero)
     valid = (
-        (merged["open_a"] > 0) & (merged["close_a"] > 0)
-        & (merged["high_a"] > 0) & (merged["low_a"] > 0)
+        (merged["open_a"] > 0)
+        & (merged["close_a"] > 0)
+        & (merged["high_a"] > 0)
+        & (merged["low_a"] > 0)
     )
     merged = merged[valid]
     if merged.empty:
@@ -85,7 +88,12 @@ def compute_ratio_ohlcv(
     result = result.sort_values("date").reset_index(drop=True)
 
     if not result.empty:
-        logger.info("Computed ratio OHLCV: %d rows, date range %s to %s", len(result), result['date'].iloc[0], result['date'].iloc[-1])
+        logger.info(
+            "Computed ratio OHLCV: %d rows, date range %s to %s",
+            len(result),
+            result["date"].iloc[0],
+            result["date"].iloc[-1],
+        )
     return result
 
 

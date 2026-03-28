@@ -3,7 +3,6 @@
 import logging
 import sqlite3
 import threading
-from typing import Optional
 
 import pandas as pd
 
@@ -110,7 +109,7 @@ def load_kline(code: str, market: str, start: str, end: str) -> pd.DataFrame:
         conn.close()
 
 
-def get_last_sync_date(code: str, market: str) -> Optional[str]:
+def get_last_sync_date(code: str, market: str) -> str | None:
     """Return the last synced date from sync_meta, or None if never synced.
 
     Args:
@@ -196,7 +195,7 @@ def save_premium_daily(hk_code: str, df: pd.DataFrame) -> int:
 
 def get_premium_history(
     hk_codes: list[str],
-    offsets: list[int] = [1, 5, 20, 60],
+    offsets: list[int] | None = None,
 ) -> pd.DataFrame:
     """For each hk_code, return ratio_close at the Nth most recent trading day.
 
@@ -211,6 +210,8 @@ def get_premium_history(
         DataFrame with columns: hk_code, ratio_1d, ratio_5d, ratio_20d, ratio_60d
         (column names derived from offsets).
     """
+    if offsets is None:
+        offsets = [1, 5, 20, 60]
     if not hk_codes or not offsets:
         return pd.DataFrame()
 
@@ -219,8 +220,7 @@ def get_premium_history(
 
     # Build the CASE columns dynamically
     case_cols = ", ".join(
-        f"MAX(CASE WHEN rn = {n} THEN ratio_close END) AS ratio_{n}d"
-        for n in offset_ints
+        f"MAX(CASE WHEN rn = {n} THEN ratio_close END) AS ratio_{n}d" for n in offset_ints
     )
     rn_filter = ",".join(str(n) for n in offset_ints)
 

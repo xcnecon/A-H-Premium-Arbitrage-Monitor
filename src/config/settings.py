@@ -34,21 +34,19 @@ MARKET_OVERLAP_END: str = "15:00"
 # K-line cache sync
 # First sync fetches all available history; subsequent runs only delta
 KLINE_HISTORY_START: str = "2000-01-01"
-SYNC_DELAY_FUTU: float = 0.5      # seconds between Futu API calls during sync
-SYNC_DELAY_A: float = 0.3         # seconds between A-share API calls during sync
+SYNC_DELAY_FUTU: float = 0.5  # seconds between Futu API calls during sync
+SYNC_DELAY_A: float = 0.3  # seconds between A-share API calls during sync
 
 # Default FX rate (CNH per 1 HKD) — used when all FX sources fail
 DEFAULT_FX_RATE: float = 0.9170
 
 # Alert defaults
-ALERT_MAX_PER_MINUTE: int = 5           # global rate limit
-MAX_ALERTS_PER_STOCK: int = 3           # max crossover thresholds per stock
+ALERT_MAX_PER_MINUTE: int = 5  # global rate limit
+MAX_ALERTS_PER_STOCK: int = 3  # max crossover thresholds per stock
 
 # ─── China proxy for A-share APIs (user-configurable) ───
 _proxy_url: str | None = os.getenv("A_SHARE_PROXY_URL")
-A_SHARE_PROXY: dict | None = (
-    {"http": _proxy_url, "https": _proxy_url} if _proxy_url else None
-)
+A_SHARE_PROXY: dict | None = {"http": _proxy_url, "https": _proxy_url} if _proxy_url else None
 
 # ─── Thread pool size for parallel historical sync (user-configurable) ───
 SYNC_A_WORKERS: int = int(os.getenv("SYNC_A_WORKERS", "10"))

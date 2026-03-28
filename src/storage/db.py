@@ -1,18 +1,13 @@
 import logging
 import sqlite3
-import threading
 from datetime import datetime
-from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
 from src.config.settings import DB_PATH
+from src.storage.kline_cache import _write_lock
 
 logger = logging.getLogger(__name__)
-
-# Module-level write lock — shared with kline_cache via import
-from src.storage.kline_cache import _write_lock
 
 
 def _get_connection() -> sqlite3.Connection:
@@ -192,7 +187,7 @@ def get_watchlist() -> list[dict]:
         conn.close()
 
 
-def get_pair(hk_code: str) -> Optional[dict]:
+def get_pair(hk_code: str) -> dict | None:
     """
     Get a specific pair from the watchlist.
 
@@ -235,9 +230,7 @@ def get_fx_cached(date_str: str) -> float | None:
     """Get a single cached FX rate by date string 'YYYY-MM-DD'."""
     conn = _get_connection()
     try:
-        cursor = conn.execute(
-            "SELECT rate FROM fx_rates WHERE date = ?", (date_str,)
-        )
+        cursor = conn.execute("SELECT rate FROM fx_rates WHERE date = ?", (date_str,))
         row = cursor.fetchone()
         return float(row["rate"]) if row else None
     finally:
@@ -255,7 +248,10 @@ def get_fx_range_cached(start: str, end: str) -> pd.DataFrame:
         rows = cursor.fetchall()
         if not rows:
             return pd.DataFrame()
-        data = [{"date": datetime.strptime(r["date"], "%Y-%m-%d").date(), "rate": r["rate"]} for r in rows]
+        data = [
+            {"date": datetime.strptime(r["date"], "%Y-%m-%d").date(), "rate": r["rate"]}
+            for r in rows
+        ]
         return pd.DataFrame(data)
     finally:
         conn.close()
@@ -334,7 +330,7 @@ def delete_alert_rule(hk_code: str, threshold: float) -> bool:
         conn.close()
 
 
-def get_alert_rules(hk_code: Optional[str] = None) -> list[dict]:
+def get_alert_rules(hk_code: str | None = None) -> list[dict]:
     """Get enabled alert rules with crossover state, optionally filtered."""
     conn = _get_connection()
     try:
@@ -360,8 +356,9 @@ def get_alert_rules(hk_code: Optional[str] = None) -> list[dict]:
         conn.close()
 
 
-def update_alert_state(rule_id: int, last_side: Optional[str] = None,
-                       last_premium: Optional[float] = None) -> None:
+def update_alert_state(
+    rule_id: int, last_side: str | None = None, last_premium: float | None = None
+) -> None:
     """Update alert crossover state (last_side and/or last_premium)."""
     conn = _get_connection()
     try:
@@ -383,9 +380,14 @@ def update_alert_state(rule_id: int, last_side: Optional[str] = None,
         conn.close()
 
 
-def log_alert_event(rule_id: int, hk_code: str, direction: str,
-                    event: str, premium_value: float,
-                    detail: Optional[str] = None) -> None:
+def log_alert_event(
+    rule_id: int,
+    hk_code: str,
+    direction: str,
+    event: str,
+    premium_value: float,
+    detail: str | None = None,
+) -> None:
     """Append to alert audit log."""
     conn = _get_connection()
     try:

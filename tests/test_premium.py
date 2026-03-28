@@ -74,8 +74,15 @@ def test_premium_pct_h_premium():
 
 # --- compute_premium_stats tests ---
 
-_STATS_KEYS = {"zscore", "percentile", "mean_30d", "std_30d",
-               "prem_min_30d", "prem_max_30d", "prem_median_30d"}
+_STATS_KEYS = {
+    "zscore",
+    "percentile",
+    "mean_30d",
+    "std_30d",
+    "prem_min_30d",
+    "prem_max_30d",
+    "prem_median_30d",
+}
 
 
 def test_premium_stats_basic():

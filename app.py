@@ -10,12 +10,13 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from src.calc.premium import compute_premium_pct, compute_premium_stats, compute_ratio_ohlcv
+from src.alerts.checker import evaluate_alerts
+from src.calc.premium import compute_premium_pct, compute_ratio_ohlcv
 from src.calc.screener import compute_screener_table
 from src.data.ah_mapping import get_a_code, get_all_pairs, get_pair_name
 from src.data.akshare_client import get_a_kline
-from src.data.fx_client import get_fx_latest, get_fx_range
 from src.data.futu_client import get_h_kline
+from src.data.fx_client import get_fx_latest, get_fx_range
 from src.data.realtime import (
     get_a_snapshot,
     get_a_snapshots_batch,
@@ -23,11 +24,16 @@ from src.data.realtime import (
     get_h_snapshots_batch,
 )
 from src.data.sync import sync_all
-from src.alerts.checker import evaluate_alerts
 from src.storage.db import (
-    add_pair, get_watchlist, init_db, remove_pair,
-    get_alert_rules, upsert_alert_rule, delete_alert_rule,
-    get_alert_history, get_all_alert_rules_with_state,
+    add_pair,
+    delete_alert_rule,
+    get_alert_history,
+    get_alert_rules,
+    get_all_alert_rules_with_state,
+    get_watchlist,
+    init_db,
+    remove_pair,
+    upsert_alert_rule,
 )
 from src.storage.kline_cache import get_premium_history
 
@@ -309,21 +315,31 @@ def _chart_colors(dark: bool) -> dict:
     """Get Plotly chart color scheme for current theme."""
     if dark:
         return dict(
-            paper="#1C1917", plot="#1C1917",
-            grid="rgba(255,255,255,0.06)", text="#F5F0EB",
+            paper="#1C1917",
+            plot="#1C1917",
+            grid="rgba(255,255,255,0.06)",
+            text="#F5F0EB",
             hover="#292524",
-            up="#4ADE80", up_fill="rgba(74,222,128,0.8)",
-            dn="#F87171", dn_fill="rgba(248,113,113,0.8)",
-            a_bar="rgba(248,113,113,0.45)", h_bar="rgba(232,149,106,0.45)",
+            up="#4ADE80",
+            up_fill="rgba(74,222,128,0.8)",
+            dn="#F87171",
+            dn_fill="rgba(248,113,113,0.8)",
+            a_bar="rgba(248,113,113,0.45)",
+            h_bar="rgba(232,149,106,0.45)",
             parity="rgba(255,255,255,0.25)",
         )
     return dict(
-        paper="#FFFFFF", plot="#FFFFFF",
-        grid="rgba(0,0,0,0.06)", text="#1A1816",
+        paper="#FFFFFF",
+        plot="#FFFFFF",
+        grid="rgba(0,0,0,0.06)",
+        text="#1A1816",
         hover="#F5F0EB",
-        up="#16A34A", up_fill="rgba(22,163,74,0.8)",
-        dn="#DC2626", dn_fill="rgba(220,38,38,0.8)",
-        a_bar="rgba(220,38,38,0.35)", h_bar="rgba(217,119,87,0.4)",
+        up="#16A34A",
+        up_fill="rgba(22,163,74,0.8)",
+        dn="#DC2626",
+        dn_fill="rgba(220,38,38,0.8)",
+        a_bar="rgba(220,38,38,0.35)",
+        h_bar="rgba(217,119,87,0.4)",
         parity="rgba(0,0,0,0.2)",
     )
 
@@ -340,7 +356,10 @@ st.set_page_config(
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
 st.markdown(
-    '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">',
+    '<link href="https://fonts.googleapis.com/css2?'
+    "family=Inter:wght@300..700"
+    "&family=JetBrains+Mono:wght@400..700"
+    '&display=swap" rel="stylesheet">',
     unsafe_allow_html=True,
 )
 st.markdown(_build_theme_css(st.session_state.dark_mode), unsafe_allow_html=True)
@@ -488,12 +507,20 @@ def _watchlist_panel() -> None:
                 prev_ratio = (h_prev * fx) / a_prev
                 prev_prem = (prev_ratio - 1) * 100
                 daily_chg = round(premium - prev_prem, 2)
-        rows.append({"code": hk, "name": item["name"], "ratio": ratio, "premium": premium, "daily_chg": daily_chg})
+        rows.append(
+            {
+                "code": hk,
+                "name": item["name"],
+                "ratio": ratio,
+                "premium": premium,
+                "daily_chg": daily_chg,
+            }
+        )
 
     # ── Evaluate alert rules against current premiums ──
     if rows:
         premium_data: dict[str, dict] = {}
-        for item, r in zip(watchlist, rows):
+        for item, r in zip(watchlist, rows, strict=False):
             if r["premium"] is not None:
                 h = h_snaps.get(item["hk_code"])
                 a = a_snaps.get(item["a_code"])
@@ -522,19 +549,21 @@ def _watchlist_panel() -> None:
         '<th class="c-sym">Symbol</th>'
         '<th class="c-prm">Prem%</th>'
         '<th class="c-chg">Chg</th>'
-        '</tr></thead><tbody>'
+        "</tr></thead><tbody>"
     )
     for r in rows:
         hk = r["code"]
         sel = "sel" if hk == selected else ""
         if r["premium"] is not None:
             cls = "tv-up" if r["premium"] > 0 else ("tv-dn" if r["premium"] < 0 else "tv-fl")
-            prem_s = f'{r["premium"]:+.1f}%'
+            prem_s = f"{r['premium']:+.1f}%"
         else:
             cls, prem_s = "tv-fl", "—"
         if r["daily_chg"] is not None:
-            chg_cls = "tv-up" if r["daily_chg"] > 0 else ("tv-dn" if r["daily_chg"] < 0 else "tv-fl")
-            chg_s = f'{r["daily_chg"]:+.2f}%'
+            chg_cls = (
+                "tv-up" if r["daily_chg"] > 0 else ("tv-dn" if r["daily_chg"] < 0 else "tv-fl")
+            )
+            chg_s = f"{r['daily_chg']:+.2f}%"
         else:
             chg_cls, chg_s = "tv-fl", "—"
         html += (
@@ -543,12 +572,14 @@ def _watchlist_panel() -> None:
             f'<a href="?sel={hk}" target="_self">'
             f'<div class="sym-code">{hk}</div>'
             f'<div class="sym-name">{r["name"]}</div>'
-            f'</a></td>'
-            f'<td class="c-prm"><a href="?sel={hk}" target="_self"><span class="{cls}">{prem_s}</span></a></td>'
+            f"</a></td>"
+            f'<td class="c-prm">'
+            f'<a href="?sel={hk}" target="_self">'
+            f'<span class="{cls}">{prem_s}</span></a></td>'
             f'<td class="c-chg">'
             f'<a href="?sel={hk}" target="_self"><span class="chg-val {chg_cls}">{chg_s}</span></a>'
             f'<a href="?del={hk}" target="_self" class="row-del" title="Remove">×</a>'
-            f'</td></tr>'
+            f"</td></tr>"
         )
     html += "</tbody></table>"
     st.markdown(html, unsafe_allow_html=True)
@@ -562,9 +593,13 @@ def _alert_config_panel() -> None:
         return
 
     stock_options = [f"{w['hk_code']} \u2014 {w['name']}" for w in watchlist]
-    selected = st.selectbox("Stock", stock_options, key="alert_stock_select",
-                            label_visibility="collapsed",
-                            placeholder="Select stock...")
+    selected = st.selectbox(
+        "Stock",
+        stock_options,
+        key="alert_stock_select",
+        label_visibility="collapsed",
+        placeholder="Select stock...",
+    )
     if not selected:
         return
 
@@ -591,8 +626,12 @@ def _alert_config_panel() -> None:
         col_inp, col_add = st.columns([4, 1])
         with col_inp:
             new_val = st.number_input(
-                "Threshold %", value=0.0, step=1.0, format="%.1f",
-                key="alert_new_val", label_visibility="collapsed",
+                "Threshold %",
+                value=0.0,
+                step=1.0,
+                format="%.1f",
+                key="alert_new_val",
+                label_visibility="collapsed",
             )
         with col_add:
             if st.button("+", key="alert_add_btn"):
@@ -712,7 +751,11 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
         barmode="stack",
         hovermode="x unified",
         legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
             font=dict(color=c["text"]),
         ),
         margin=dict(l=50, r=15, t=40, b=30),
@@ -797,16 +840,15 @@ def _chart_panel(timeframe: str) -> None:
     # ── Load K-line data if stock/timeframe changed ──
     cache_key = f"{display_hk}_{timeframe}"
     if st.session_state.get("_cache_key") != cache_key:
-        with st.spinner("Loading..."):
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                fut_h = pool.submit(get_h_kline, display_hk, start_str, end_str)
-                fut_a = pool.submit(get_a_kline, a_code, start_str, end_str)
-                fut_fx_spot = pool.submit(get_fx_latest)
-                fut_fx = pool.submit(get_fx_range, start_str, end_str)
-                df_h = fut_h.result(timeout=30)
-                df_a = fut_a.result(timeout=30)
-                fx_spot = fut_fx_spot.result(timeout=30)
-                df_fx = fut_fx.result(timeout=30)
+        with st.spinner("Loading..."), ThreadPoolExecutor(max_workers=4) as pool:
+            fut_h = pool.submit(get_h_kline, display_hk, start_str, end_str)
+            fut_a = pool.submit(get_a_kline, a_code, start_str, end_str)
+            fut_fx_spot = pool.submit(get_fx_latest)
+            fut_fx = pool.submit(get_fx_range, start_str, end_str)
+            df_h = fut_h.result(timeout=30)
+            df_a = fut_a.result(timeout=30)
+            fx_spot = fut_fx_spot.result(timeout=30)
+            df_fx = fut_fx.result(timeout=30)
 
         data_ok = True
         if df_h.empty:
@@ -867,11 +909,7 @@ def _chart_panel(timeframe: str) -> None:
 
         h_cny = h_snap["price"] * fx
         live_ratio = h_cny / a_snap["price"]
-        live_open = (
-            (h_snap["open"] * fx) / a_snap["open"]
-            if a_snap["open"] > 0
-            else live_ratio
-        )
+        live_open = (h_snap["open"] * fx) / a_snap["open"] if a_snap["open"] > 0 else live_ratio
         live_high = (
             max(live_ratio, (h_snap["high"] * fx) / a_snap["low"])
             if a_snap["low"] > 0
@@ -934,12 +972,8 @@ def _chart_panel(timeframe: str) -> None:
     with st.expander("Raw Ratio Data"):
         disp = df_ratio.copy()
         disp["date"] = pd.to_datetime(disp["date"]).dt.strftime("%Y-%m-%d")
-        disp["a_turnover"] = disp["a_turnover"].apply(
-            lambda x: f"{x / 1e8:.2f}B" if x > 0 else "—"
-        )
-        disp["h_turnover"] = disp["h_turnover"].apply(
-            lambda x: f"{x / 1e8:.2f}B" if x > 0 else "—"
-        )
+        disp["a_turnover"] = disp["a_turnover"].apply(lambda x: f"{x / 1e8:.2f}B" if x > 0 else "—")
+        disp["h_turnover"] = disp["h_turnover"].apply(lambda x: f"{x / 1e8:.2f}B" if x > 0 else "—")
         st.dataframe(disp, width="stretch", hide_index=True)
 
 
@@ -950,9 +984,7 @@ tab_chart, tab_screener = st.tabs(
 )
 
 with tab_chart:
-    col_ticker, col_tf, col_add = st.columns(
-        [4, 3, 1], vertical_alignment="bottom"
-    )
+    col_ticker, col_tf, col_add = st.columns([4, 3, 1], vertical_alignment="bottom")
     with col_ticker:
         st.selectbox(
             "Stock",
@@ -984,6 +1016,7 @@ with tab_chart:
                     st.rerun()
 
     _chart_panel(timeframe)
+
 
 @st.fragment(run_every=timedelta(seconds=5) if _is_market_hours() else None)
 def _screener_panel() -> None:
@@ -1024,7 +1057,7 @@ def _screener_panel() -> None:
         '<th data-t="n">1D<span class="arr"></span></th>'
         '<th data-t="n">5D<span class="arr"></span></th>'
         '<th data-t="n">20D<span class="arr"></span></th>'
-        '</tr></thead><tbody>'
+        "</tr></thead><tbody>"
     )
     for _, r in df_scr.iterrows():
         hk = r["hk_code"]
@@ -1035,23 +1068,24 @@ def _screener_panel() -> None:
         d5 = r.get("wk_chg")
         d20 = r.get("mo_chg")
         html += (
-            f'<tr>'
+            f"<tr>"
             f'<td><a href="?sel={hk}" target="_self">{hk}</a></td>'
             f'<td><a href="?sel={hk}" target="_self">{name}</a></td>'
             f'<td><a href="?sel={hk}" target="_self">'
             f'<span class="{_cls(prem)}">{_fmt(prem, "{:.2f}%")}</span></a></td>'
-            f'<td>{_fmt(vol * 100 if pd.notna(vol) else None, "{:.1f}%")}</td>'
+            f"<td>{_fmt(vol * 100 if pd.notna(vol) else None, '{:.1f}%')}</td>"
             f'<td><span class="{_cls(d1)}">{_fmt(d1, "{:+.2f}%")}</span></td>'
             f'<td><span class="{_cls(d5)}">{_fmt(d5, "{:+.2f}%")}</span></td>'
             f'<td><span class="{_cls(d20)}">{_fmt(d20, "{:+.2f}%")}</span></td>'
-            f'</tr>'
+            f"</tr>"
         )
     html += "</tbody></table></div>"
     st.markdown(html, unsafe_allow_html=True)
 
     # Sort JS — st.html injects into parent page (not iframe), so JS can
     # access the table rendered by st.markdown above.
-    st.html("""<script>
+    st.html(
+        """<script>
 (function(){
   var SK='ah_scr_sort',tbl=document.getElementById('scr-tbl');
   if(!tbl||tbl._sortBound)return;
@@ -1085,7 +1119,9 @@ def _screener_panel() -> None:
     });
   });
 })();
-</script>""", unsafe_allow_javascript=True)
+</script>""",
+        unsafe_allow_javascript=True,
+    )
 
     if not df_scr.empty:
         csv = df_scr.to_csv(index=False).encode("utf-8-sig")

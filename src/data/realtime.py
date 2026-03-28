@@ -2,10 +2,9 @@
 
 import logging
 import re
-from typing import Optional
 
 import requests
-from futu import OpenQuoteContext, RET_OK
+from futu import RET_OK, OpenQuoteContext
 
 from src.config.settings import OPEND_HOST, OPEND_PORT
 
@@ -20,7 +19,8 @@ _PROXIES: dict | None = None
 # H-share: Futu get_market_snapshot
 # ---------------------------------------------------------------------------
 
-def get_h_snapshot(code: str) -> Optional[dict]:
+
+def get_h_snapshot(code: str) -> dict | None:
     """
     Fetch a real-time snapshot for an H-share via Futu OpenD.
 
@@ -61,6 +61,7 @@ def get_h_snapshot(code: str) -> Optional[dict]:
 # A-share: Sina / Tencent HTTP real-time quote
 # ---------------------------------------------------------------------------
 
+
 def _a_code_to_sina_symbol(a_code: str) -> str:
     """Convert a bare A-share code to Sina symbol (sh601939 / sz000001)."""
     if a_code.startswith(("6", "9")):
@@ -75,7 +76,7 @@ def _a_code_to_tencent_symbol(a_code: str) -> str:
     return f"sz{a_code}"
 
 
-def _fetch_sina(a_code: str) -> Optional[dict]:
+def _fetch_sina(a_code: str) -> dict | None:
     """
     Try fetching a real-time A-share quote from the Sina HTTP API.
 
@@ -129,7 +130,7 @@ def _fetch_sina(a_code: str) -> Optional[dict]:
         return None
 
 
-def _fetch_tencent(a_code: str) -> Optional[dict]:
+def _fetch_tencent(a_code: str) -> dict | None:
     """
     Try fetching a real-time A-share quote from the Tencent HTTP API.
 
@@ -297,7 +298,7 @@ def get_a_snapshots_batch(codes: list[str]) -> dict[str, dict]:
     return result
 
 
-def get_a_snapshot(code: str) -> Optional[dict]:
+def get_a_snapshot(code: str) -> dict | None:
     """
     Fetch a real-time snapshot for an A-share.
 
