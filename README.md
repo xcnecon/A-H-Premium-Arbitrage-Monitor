@@ -2,10 +2,13 @@
 
 Real-time monitor for A-share / H-share premium arbitrage opportunities across 169 dual-listed Chinese stocks. Tracks price differentials between Shanghai/Shenzhen (A-shares) and Hong Kong (H-shares) exchanges, with interactive candlestick charts, a premium screener, and Telegram alerts.
 
+![Chart view](docs/screenshot-chart.png)
+![Screener view](docs/screenshot-screener.png)
+
 ## Features
 
 - **Real-time premium monitoring** -- live H/A ratio and premium % updates every 5 seconds during market hours
-- **Historical K-line charts** -- interactive candlestick + stacked volume subplots (Plotly) for both A-share and H-share legs
+- **Historical charts** -- interactive line charts (Plotly) for A-share price, H-share price, and H/A premium ratio
 - **Premium screener** -- scan all 169 A/H pairs at once to find the widest dislocations
 - **Telegram alerts** -- configurable threshold-based notifications when premium crosses user-defined levels
 - **FX rate tracking** -- live CNH/HKD rate from Yahoo Finance with SQLite caching and fallback sources
@@ -89,8 +92,7 @@ All calculations use **unadjusted prices** to ensure accurate cross-market compa
 |---------|------------|
 | H/A Ratio | `(H_HKD * CNH_per_HKD) / A_CNY` |
 | H Premium % | `(ratio - 1) * 100` |
-| Ratio K-line High | `(H_high * fx) / A_low` |
-| Ratio K-line Low | `(H_low * fx) / A_high` |
+| Ratio Close | `(H_close * fx) / A_close` |
 
 A ratio > 1 (positive premium %) means the H-share trades at a premium to its A-share counterpart.
 
