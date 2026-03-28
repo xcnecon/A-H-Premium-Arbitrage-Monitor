@@ -37,7 +37,7 @@ The project uses a hybrid data architecture because Futu OpenAPI does not serve 
 ## Installation
 
 ```bash
-git clone https://github.com/your-username/ah-arb.git
+git clone https://github.com/xcnecon/ah-arb.git
 cd ah-arb
 cp .env.example .env
 # Edit .env with your credentials (see Configuration below)
