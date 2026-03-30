@@ -1,71 +1,62 @@
 """HKD/CNH exchange rate fetcher with SQLite caching.
 
 Sources (in priority order):
-  1. Yahoo Finance — HKDCNH=X for live rate (offshore, tradeable)
-  2. Yahoo Finance — HKDCNY=X for historical range (CNH has no Yahoo history;
-     CNY-CNH spread is typically < 0.1%, acceptable proxy)
+  1. Yahoo Finance via yfinance — HKDCNH=X for live rate (offshore, tradeable)
+  2. Yahoo Finance via yfinance — HKDCNY=X for historical range (CNH has no
+     Yahoo history; CNY-CNH spread is typically < 0.1%, acceptable proxy)
   3. AKShare fx_spot_quote — live spot only (backup)
 """
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pandas as pd
-import requests
+import yfinance as yf
 
 from src.config.settings import DEFAULT_FX_RATE
 from src.storage.db import get_fx_cached, get_fx_range_cached, save_fx_rates
 
 logger = logging.getLogger(__name__)
 
-_SESSION = requests.Session()
-_SESSION.headers.update({"User-Agent": "Mozilla/5.0 (ah-arb/1.0)"})
-_TIMEOUT = 10
 
-
-# ─── Source 1: Yahoo Finance (HKDCNH=X) ───
+# ─── Source 1: Yahoo Finance via yfinance (handles crumb/cookie auth) ───
 
 
 def _yahoo_fx_history(start: str, end: str) -> pd.DataFrame:
-    """Fetch daily HKD→CNH from Yahoo Finance v8 chart API.
+    """Fetch daily HKD→CNH from Yahoo Finance via yfinance.
 
     HKDCNH=X has no historical data on Yahoo, so we use HKDCNY=X as proxy.
     The CNY-CNH spread is typically < 0.1% — acceptable for premium calculation.
 
     Returns DataFrame with columns: date, rate (approx CNH per 1 HKD).
     """
-    start_ts = int(datetime.strptime(start, "%Y-%m-%d").timestamp())
-    end_ts = int(datetime.strptime(end, "%Y-%m-%d").timestamp()) + 86400
-    # HKDCNY=X has full history; HKDCNH=X only returns live quote
-    url = "https://query1.finance.yahoo.com/v8/finance/chart/HKDCNY%3DX"
-    params = {"period1": start_ts, "period2": end_ts, "interval": "1d"}
-    resp = _SESSION.get(url, params=params, timeout=_TIMEOUT)
-    resp.raise_for_status()
-    data = resp.json()["chart"]["result"][0]
-    timestamps = data["timestamp"]
-    closes = data["indicators"]["quote"][0]["close"]
+    # yfinance end date is exclusive, add 1 day
+    end_dt = datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)
+    df = yf.download(
+        "HKDCNY=X", start=start, end=end_dt.strftime("%Y-%m-%d"),
+        interval="1d", progress=False, auto_adjust=False, multi_level_index=False,
+    )
+    if df is None or df.empty:
+        return pd.DataFrame()
     rows = []
-    for ts, c in zip(timestamps, closes, strict=False):
-        if c is not None:
-            rows.append(
-                {
-                    "date": datetime.utcfromtimestamp(ts).date(),
-                    "rate": round(c, 6),
-                }
-            )
+    for idx, row in df.iterrows():
+        c = row["Close"]
+        if pd.notna(c):
+            rows.append({"date": idx.date(), "rate": round(float(c), 6)})
     return pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
 
 
 def _yahoo_fx_latest() -> float | None:
-    """Fetch latest HKD→CNH from Yahoo Finance."""
-    url = "https://query1.finance.yahoo.com/v8/finance/chart/HKDCNH%3DX"
-    resp = _SESSION.get(url, params={"range": "5d", "interval": "1d"}, timeout=_TIMEOUT)
-    resp.raise_for_status()
-    closes = resp.json()["chart"]["result"][0]["indicators"]["quote"][0]["close"]
-    # Return last non-None value
-    for c in reversed(closes):
-        if c is not None:
-            return round(c, 6)
+    """Fetch latest HKD→CNH from Yahoo Finance via yfinance."""
+    df = yf.download(
+        "HKDCNH=X", period="5d", interval="1d",
+        progress=False, auto_adjust=False, multi_level_index=False,
+    )
+    if df is None or df.empty:
+        return None
+    for c in reversed(df["Close"].tolist()):
+        if pd.notna(c):
+            return round(float(c), 6)
     return None
 
 
@@ -109,7 +100,7 @@ def get_fx_latest() -> float:
     """
     # 1. Check SQLite cache — today or yesterday (instant, no network)
     today = date.today()
-    for d in [today, today - __import__("datetime").timedelta(days=1)]:
+    for d in [today, today - timedelta(days=1)]:
         cached = get_fx_cached(d.isoformat())
         if cached is not None:
             logger.debug("FX from cache (%s): %.5f", d, cached)
