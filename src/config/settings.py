@@ -43,10 +43,20 @@ DEFAULT_FX_RATE: float = 0.9170
 # Alert defaults
 ALERT_MAX_PER_MINUTE: int = 5  # global rate limit
 MAX_ALERTS_PER_STOCK: int = 3  # max crossover thresholds per stock
+ALERT_BUFFER_PCT: float = float(os.getenv("ALERT_BUFFER_PCT", "0.1"))  # hysteresis buffer (pp)
 
 # ─── China proxy for A-share APIs (user-configurable) ───
 _proxy_url: str | None = os.getenv("A_SHARE_PROXY_URL")
 A_SHARE_PROXY: dict | None = {"http": _proxy_url, "https": _proxy_url} if _proxy_url else None
+
+# ─── Yahoo Finance / general HTTPS proxy (user-configurable) ───
+# For users in mainland China where Yahoo is blocked, or for routing through a specific proxy.
+# Set YAHOO_PROXY_URL in .env (e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080")
+_yahoo_proxy: str | None = os.getenv("YAHOO_PROXY_URL")
+YAHOO_PROXY: dict | None = {"http": _yahoo_proxy, "https": _yahoo_proxy} if _yahoo_proxy else None
+
+# Network timeouts for external APIs (seconds)
+YAHOO_TIMEOUT: float = float(os.getenv("YAHOO_TIMEOUT", "10"))
 
 # ─── Thread pool size for parallel historical sync (user-configurable) ───
 SYNC_A_WORKERS: int = int(os.getenv("SYNC_A_WORKERS", "10"))

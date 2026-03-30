@@ -491,11 +491,16 @@ def _watchlist_panel() -> None:
         h_snaps = st.session_state["_h_snaps"]
         a_snaps = st.session_state["_a_snaps"]
     else:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            fut_h = pool.submit(get_h_snapshots_batch, hk_codes)
-            fut_a = pool.submit(get_a_snapshots_batch, a_codes)
-            h_snaps = fut_h.result(timeout=10)
-            a_snaps = fut_a.result(timeout=10)
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                fut_h = pool.submit(get_h_snapshots_batch, hk_codes)
+                fut_a = pool.submit(get_a_snapshots_batch, a_codes)
+                h_snaps = fut_h.result(timeout=10)
+                a_snaps = fut_a.result(timeout=10)
+        except Exception:
+            logger.warning("Parallel snapshot fetch failed, falling back to sequential")
+            h_snaps = get_h_snapshots_batch(hk_codes)
+            a_snaps = get_a_snapshots_batch(a_codes)
         st.session_state["_h_snaps"] = h_snaps
         st.session_state["_a_snaps"] = a_snaps
         st.session_state["_snap_ts"] = time.time()
@@ -902,6 +907,10 @@ def _chart_panel(timeframe: str) -> None:
         st.session_state["fx_spot"] = fx_spot
         st.session_state["hk_code"] = display_hk
         st.session_state["a_code_display"] = a_code
+        # Invalidate chart cache so new stock gets a fresh figure
+        st.session_state.pop("_cached_fig", None)
+        st.session_state.pop("_chart_h_price", None)
+        st.session_state.pop("_chart_a_price", None)
 
     # ── Live price update ──
     if st.session_state.get("_cache_key") != cache_key:

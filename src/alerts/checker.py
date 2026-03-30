@@ -9,7 +9,7 @@ import time
 from datetime import timedelta, timezone
 
 from src.alerts.telegram import format_premium_alert, send_alert
-from src.config.settings import ALERT_MAX_PER_MINUTE
+from src.config.settings import ALERT_BUFFER_PCT, ALERT_MAX_PER_MINUTE
 from src.data.ah_mapping import get_a_code, get_pair_name
 from src.storage.db import (
     get_alert_rules,
@@ -75,8 +75,18 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
         threshold = rule["threshold"]
         last_side = rule.get("last_side")
 
-        # Determine which side of the threshold we are on now
-        current_side = "above" if premium >= threshold else "below"
+        # Determine which side of the threshold we are on now,
+        # applying hysteresis buffer to prevent rapid flip-flopping.
+        # If currently "below", must rise to threshold + buffer to cross up.
+        # If currently "above", must drop to threshold - buffer to cross down.
+        buf = ALERT_BUFFER_PCT
+        if last_side == "below":
+            current_side = "above" if premium >= threshold + buf else "below"
+        elif last_side == "above":
+            current_side = "below" if premium < threshold - buf else "above"
+        else:
+            # First evaluation — no buffer, just record side
+            current_side = "above" if premium >= threshold else "below"
 
         if last_side is None:
             # First evaluation — record the side without firing
@@ -95,7 +105,7 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
             update_alert_state(rule_id, last_premium=premium)
             continue
 
-        # ── CROSSOVER detected ──
+        # ── CROSSOVER detected (passed buffer threshold) ──
         cross_dir = "cross_up" if current_side == "above" else "cross_down"
         logger.info(
             "CROSSOVER: %s premium %.2f%% crossed %.1f%% (%s)",

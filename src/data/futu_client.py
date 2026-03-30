@@ -2,9 +2,9 @@ import logging
 from datetime import datetime
 
 import pandas as pd
-from futu import RET_OK, AuType, KLType, OpenQuoteContext
+from futu import RET_OK, AuType, KLType
 
-from src.config.settings import OPEND_HOST, OPEND_PORT
+from src.data.futu_ctx import get_quote_ctx
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def get_h_kline(code: str, start: str, end: str, ktype: str = "K_DAY") -> pd.Dat
     futu_code = f"HK.{code}" if not code.startswith("HK.") else code
     kl_type = getattr(KLType, ktype, KLType.K_DAY)
 
-    ctx = OpenQuoteContext(host=OPEND_HOST, port=OPEND_PORT)
+    ctx = get_quote_ctx()
     try:
         all_data = []
         page_req_key = None
@@ -68,8 +68,6 @@ def get_h_kline(code: str, start: str, end: str, ktype: str = "K_DAY") -> pd.Dat
     except Exception as e:
         logger.error("Futu connection error: %s", e)
         return _fallback_akshare_hk(code, start, end)
-    finally:
-        ctx.close()
 
 
 def get_h_kline_with_ctx(

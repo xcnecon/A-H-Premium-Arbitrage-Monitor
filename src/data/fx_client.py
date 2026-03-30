@@ -5,18 +5,150 @@ Sources (in priority order):
   2. Yahoo Finance via yfinance — HKDCNY=X for historical range (CNH has no
      Yahoo history; CNY-CNH spread is typically < 0.1%, acceptable proxy)
   3. AKShare fx_spot_quote — live spot only (backup)
+
+Robustness: yfinance calls go through a shared curl_cffi session with
+configurable timeout (YAHOO_TIMEOUT) and optional proxy (YAHOO_PROXY_URL).
+Transient failures are retried up to 2 times with backoff.
 """
 
+import asyncio
 import logging
+import time
 from datetime import date, datetime, timedelta
 
 import pandas as pd
-import yfinance as yf
 
-from src.config.settings import DEFAULT_FX_RATE
+from src.config.settings import DEFAULT_FX_RATE, YAHOO_PROXY, YAHOO_TIMEOUT
 from src.storage.db import get_fx_cached, get_fx_range_cached, save_fx_rates
 
 logger = logging.getLogger(__name__)
+
+# ─── Shared curl_cffi session for Yahoo Finance ───
+# yfinance ≥ 1.0 uses curl_cffi (not requests). Reusing one session
+# keeps TLS connections alive and avoids repeated TLS handshakes.
+
+_yf_session = None
+
+
+def _get_yf_session():
+    """Lazily create a curl_cffi session for yfinance."""
+    global _yf_session
+    if _yf_session is not None:
+        return _yf_session
+
+    from curl_cffi.requests import Session
+
+    kwargs = {"impersonate": "chrome", "timeout": YAHOO_TIMEOUT}
+    if YAHOO_PROXY:
+        kwargs["proxies"] = YAHOO_PROXY
+        logger.info("Yahoo Finance using proxy: %s", list(YAHOO_PROXY.values())[0])
+
+    _yf_session = Session(**kwargs)
+    return _yf_session
+
+
+def _clear_yf_cookies() -> None:
+    """Clear yfinance's cached cookies so the next request gets a fresh session.
+
+    Yahoo tracks rate limits via the A3 cookie. Clearing it is equivalent
+    to a fresh browser — the rate limit is tied to the cookie, not the IP.
+    Uses yfinance's own cache API to avoid corrupting the DB.
+    """
+    global _yf_session
+    try:
+        from yfinance.cache import get_cookie_cache
+
+        cc = get_cookie_cache()
+        # store(strategy, None) deletes the cookie row cleanly
+        cc.store("curlCffi", None)
+        logger.info("Cleared yfinance cookie via cache API")
+    except Exception as e:
+        logger.warning("Failed to clear yfinance cookies via API: %s", e)
+
+    # Force recreate session on next call
+    _yf_session = None
+
+
+def _ensure_event_loop() -> None:
+    """Ensure the current thread has an open asyncio event loop.
+
+    Streamlit's ScriptRunner thread and ThreadPoolExecutor workers have no
+    event loop by default.  curl_cffi (used by yfinance) needs one for
+    transport cleanup — without it, ``RuntimeError: Event loop is closed``.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            asyncio.set_event_loop(asyncio.new_event_loop())
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
+def _yf_download_with_retry(ticker: str, retries: int = 2, **kwargs) -> pd.DataFrame:
+    """Call yf.download with timeout, session reuse, and retry on failure.
+
+    On 429 (rate limit), clears the cached Yahoo cookie (which carries the
+    rate-limit tag) and retries once with a fresh session. If still limited,
+    falls through to AKShare immediately.
+
+    Args:
+        ticker: Yahoo Finance ticker symbol.
+        retries: Max retry attempts on transient failure.
+        **kwargs: Passed to yf.download().
+
+    Returns:
+        DataFrame from yfinance, or empty DataFrame on failure.
+    """
+    _ensure_event_loop()
+    import yfinance as yf
+
+    session = _get_yf_session()
+    kwargs.setdefault("progress", False)
+    kwargs.setdefault("auto_adjust", False)
+    kwargs.setdefault("multi_level_index", False)
+    kwargs["session"] = session
+    kwargs["timeout"] = int(YAHOO_TIMEOUT)
+
+    last_err = None
+    for attempt in range(1, retries + 2):  # 1 initial + N retries
+        try:
+            t0 = time.monotonic()
+            df = yf.download(ticker, **kwargs)
+            elapsed = time.monotonic() - t0
+            if df is not None and not df.empty:
+                if attempt > 1:
+                    logger.info("Yahoo %s succeeded on attempt %d (%.1fs)", ticker, attempt, elapsed)
+                return df
+            # Empty result — might be transient, retry
+            logger.debug("Yahoo %s returned empty on attempt %d (%.1fs)", ticker, attempt, elapsed)
+        except Exception as e:
+            last_err = e
+            err_str = str(e)
+            logger.warning("Yahoo %s attempt %d failed: %s", ticker, attempt, e)
+
+            # 429 rate limit — clear poisoned cookie and retry once
+            if "RateLimit" in err_str or "Too Many Requests" in err_str or "429" in err_str:
+                _clear_yf_cookies()
+                # Retry with fresh session
+                session = _get_yf_session()
+                kwargs["session"] = session
+                try:
+                    logger.info("Yahoo %s retrying with fresh cookies...", ticker)
+                    df = yf.download(ticker, **kwargs)
+                    if df is not None and not df.empty:
+                        logger.info("Yahoo %s succeeded after cookie reset", ticker)
+                        return df
+                except Exception as e2:
+                    logger.warning("Yahoo %s still failed after cookie reset: %s", ticker, e2)
+                return pd.DataFrame()
+
+        if attempt <= retries:
+            backoff = 2.0 * attempt  # 2s, 4s
+            time.sleep(backoff)
+
+    if last_err:
+        logger.warning("Yahoo %s all %d attempts failed, last error: %s", ticker, retries + 1, last_err)
+    return pd.DataFrame()
 
 
 # ─── Source 1: Yahoo Finance via yfinance (handles crumb/cookie auth) ───
@@ -32,11 +164,11 @@ def _yahoo_fx_history(start: str, end: str) -> pd.DataFrame:
     """
     # yfinance end date is exclusive, add 1 day
     end_dt = datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)
-    df = yf.download(
+    df = _yf_download_with_retry(
         "HKDCNY=X", start=start, end=end_dt.strftime("%Y-%m-%d"),
-        interval="1d", progress=False, auto_adjust=False, multi_level_index=False,
+        interval="1d",
     )
-    if df is None or df.empty:
+    if df.empty:
         return pd.DataFrame()
     rows = []
     for idx, row in df.iterrows():
@@ -48,11 +180,8 @@ def _yahoo_fx_history(start: str, end: str) -> pd.DataFrame:
 
 def _yahoo_fx_latest() -> float | None:
     """Fetch latest HKD→CNH from Yahoo Finance via yfinance."""
-    df = yf.download(
-        "HKDCNH=X", period="5d", interval="1d",
-        progress=False, auto_adjust=False, multi_level_index=False,
-    )
-    if df is None or df.empty:
+    df = _yf_download_with_retry("HKDCNH=X", period="5d", interval="1d")
+    if df.empty:
         return None
     for c in reversed(df["Close"].tolist()):
         if pd.notna(c):
@@ -106,21 +235,22 @@ def get_fx_latest() -> float:
             logger.debug("FX from cache (%s): %.5f", d, cached)
             return cached
 
-    # 2. Cache miss — fetch from network (Yahoo first — direct HK, no proxy)
+    # 2. Cache miss — fetch from network (Yahoo first — direct HK, no proxy needed)
     for name, fn in [("Yahoo", _yahoo_fx_latest), ("AKShare", _akshare_fx_spot)]:
         try:
+            t0 = time.monotonic()
             rate = fn()
+            elapsed = time.monotonic() - t0
             if rate and 0.5 < rate < 1.5:
-                logger.info("FX latest from %s: %.5f", name, rate)
+                logger.info("FX latest from %s: %.5f (%.1fs)", name, rate, elapsed)
                 # Persist to cache for next time
                 save_fx_rates(pd.DataFrame([{"date": today, "rate": rate}]))
                 return rate
+            logger.warning("FX from %s returned invalid rate: %s (%.1fs)", name, rate, elapsed)
         except Exception as e:
             logger.warning("FX latest from %s failed: %s", name, e)
 
     # 3. Any cached value at all
-    from src.storage.db import get_fx_range_cached
-
     recent = get_fx_range_cached("2020-01-01", today.isoformat())
     if not recent.empty and "rate" in recent.columns:
         rate = recent.iloc[-1]["rate"]
@@ -134,8 +264,8 @@ def get_fx_latest() -> float:
 def get_fx_range(start: str, end: str) -> pd.DataFrame:
     """Get daily CNH-per-HKD rates for a date range.
 
-    Checks SQLite cache first, fetches missing dates from Yahoo Finance,
-    then persists new data.
+    Uses SQLite cache with forward-fill for missing dates (holidays, etc.).
+    Only fetches from Yahoo when the cache has no data at all for the range.
 
     Returns:
         DataFrame with columns: date (datetime.date), rate (float)
@@ -143,38 +273,35 @@ def get_fx_range(start: str, end: str) -> pd.DataFrame:
     cached_df = get_fx_range_cached(start, end)
 
     if not cached_df.empty:
-        cached_dates = set(cached_df["date"].tolist())
-        all_dates = set(pd.bdate_range(start, end).date)
-        missing = all_dates - cached_dates
-        if not missing:
-            return cached_df
-        fetch_start = min(missing).isoformat()
-        fetch_end = max(missing).isoformat()
-    else:
-        fetch_start, fetch_end = start, end
+        # Cache has data — forward-fill any gaps (holidays, weekends, today)
+        # No network call needed; FX moves < 0.1%/day
+        return _ffill_fx(cached_df, start, end)
 
-    # Fetch from Yahoo Finance
+    # Cache completely empty for this range — fetch once from Yahoo
     fetched = pd.DataFrame()
     try:
-        fetched = _yahoo_fx_history(fetch_start, fetch_end)
+        fetched = _yahoo_fx_history(start, end)
         if not fetched.empty:
-            logger.info("FX from Yahoo: %d rows", len(fetched))
+            logger.info("FX from Yahoo (first fetch): %d rows", len(fetched))
     except Exception as e:
         logger.warning("Yahoo FX range failed: %s", e)
 
     if not fetched.empty:
         save_fx_rates(fetched)
+        return _ffill_fx(fetched, start, end)
 
-    # Combine
-    if not cached_df.empty and not fetched.empty:
-        result = pd.concat([cached_df, fetched]).drop_duplicates(subset="date")
-    elif not cached_df.empty:
-        result = cached_df
-    elif not fetched.empty:
-        result = fetched
-    else:
-        rate = get_fx_latest()
-        dates = pd.bdate_range(start, end)
-        result = pd.DataFrame({"date": dates.date, "rate": rate})
+    # Yahoo failed too — use latest spot rate for all dates
+    rate = get_fx_latest()
+    dates = pd.bdate_range(start, end)
+    return pd.DataFrame({"date": dates.date, "rate": rate})
 
-    return result.sort_values("date").reset_index(drop=True)
+
+def _ffill_fx(df: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    """Forward-fill FX rates to cover every business day in [start, end]."""
+    bdays = pd.bdate_range(start, end)
+    if bdays.empty:
+        return df
+    full = pd.DataFrame({"date": bdays.date})
+    merged = full.merge(df, on="date", how="left")
+    merged["rate"] = merged["rate"].ffill().bfill()
+    return merged.reset_index(drop=True)
