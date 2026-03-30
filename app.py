@@ -680,7 +680,13 @@ def _recent_alerts_panel() -> None:
             prem = h.get("premium_value")
             prem_s = f"{prem:+.1f}%" if prem is not None else "—"
             dir_icon = "\u2191" if h["direction"] == "cross_up" else "\u2193"
-            ts = str(h.get("created_at", ""))[:16]
+            ts_raw = h.get("created_at", "")
+            try:
+                ts_utc = datetime.strptime(str(ts_raw)[:19], "%Y-%m-%d %H:%M:%S")
+                ts_hkt = ts_utc + timedelta(hours=8)
+                ts = ts_hkt.strftime("%m-%d %H:%M")
+            except (ValueError, TypeError):
+                ts = str(ts_raw)[:16]
             st.caption(f"{icon} {h['hk_code']} {dir_icon} {prem_s} ({ts})")
 
 
@@ -713,7 +719,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
         row_heights=[0.7, 0.3],
         shared_xaxes=True,
         vertical_spacing=0.03,
-        subplot_titles=("H/A Ratio", "Turnover (B HKD)"),
+        subplot_titles=("H/A Ratio", "Volume (M shares)"),
     )
     fig.add_trace(
         go.Scatter(
@@ -740,8 +746,8 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
     fig.add_trace(
         go.Bar(
             x=dates,
-            y=df["a_turnover"] / 1e9,
-            name="A Turnover",
+            y=df["a_volume"] / 1e6,
+            name="A Volume",
             marker_color=c["a_bar"],
         ),
         row=2,
@@ -750,8 +756,8 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
     fig.add_trace(
         go.Bar(
             x=dates,
-            y=df["h_turnover"] / 1e9,
-            name="H Turnover",
+            y=df["h_volume"] / 1e6,
+            name="H Volume",
             marker_color=c["h_bar"],
         ),
         row=2,
@@ -794,7 +800,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
         col=1,
     )
     fig.update_yaxes(
-        title_text="Turnover (B)",
+        title_text="Volume (M)",
         gridcolor=c["grid"],
         hoverformat=".2f",
         tickformat=".1f",
@@ -940,8 +946,8 @@ def _chart_panel(timeframe: str) -> None:
             df_ratio.at[idx, "close"] = live_ratio
             df_ratio.at[idx, "high"] = max(df_ratio.at[idx, "high"], live_high)
             df_ratio.at[idx, "low"] = min(df_ratio.at[idx, "low"], live_low)
-            df_ratio.at[idx, "a_turnover"] = a_snap["turnover"] / fx
-            df_ratio.at[idx, "h_turnover"] = h_snap["turnover"]
+            df_ratio.at[idx, "a_volume"] = a_snap["volume"]
+            df_ratio.at[idx, "h_volume"] = h_snap["volume"]
         else:
             new_row = pd.DataFrame(
                 [
@@ -951,8 +957,8 @@ def _chart_panel(timeframe: str) -> None:
                         "high": live_high,
                         "low": live_low,
                         "close": live_ratio,
-                        "a_turnover": a_snap["turnover"] / fx,
-                        "h_turnover": h_snap["turnover"],
+                        "a_volume": a_snap["volume"],
+                        "h_volume": h_snap["volume"],
                     }
                 ]
             )
@@ -966,19 +972,25 @@ def _chart_panel(timeframe: str) -> None:
     premium_pct = compute_premium_pct(current_ratio)
 
     tail_7 = df_ratio.tail(7)
-    h_tvr_7 = tail_7["h_turnover"].sum()
-    a_tvr_7 = tail_7["a_turnover"].sum()
-    tvr_ratio_7d = h_tvr_7 / a_tvr_7 if a_tvr_7 > 0 else 0.0
+    h_vol_7 = tail_7["h_volume"].sum()
+    a_vol_7 = tail_7["a_volume"].sum()
+    vol_ratio_7d = h_vol_7 / a_vol_7 if a_vol_7 > 0 else 0.0
 
-    h_tvr_1d = latest["h_turnover"]
-    a_tvr_1d = latest["a_turnover"]
-    tvr_ratio_1d = h_tvr_1d / a_tvr_1d if a_tvr_1d > 0 else 0.0
+    h_vol_1d = latest["h_volume"]
+    a_vol_1d = latest["a_volume"]
+    vol_ratio_1d = h_vol_1d / a_vol_1d if a_vol_1d > 0 else 0.0
 
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    h_vol_avg_7d = tail_7["h_volume"].mean()
+
+    h_vol_today = h_snap["volume"] if h_snap else latest["h_volume"]
+
+    col_m1, col_m2, col_m3, col_m4, col_m5, col_m6 = st.columns(6)
     col_m1.metric("H Premium", f"{premium_pct:+.2f}%")
     col_m2.metric("FX (CNH/HKD)", f"{fx:.4f}")
-    col_m3.metric("1D H/A Turnover", f"{tvr_ratio_1d:.2f}x")
-    col_m4.metric("7D H/A Turnover", f"{tvr_ratio_7d:.2f}x")
+    col_m3.metric("1D H/A Vol", f"{vol_ratio_1d:.2f}x")
+    col_m4.metric("7D H/A Vol", f"{vol_ratio_7d:.2f}x")
+    col_m5.metric("7D H Avg Vol", f"{h_vol_avg_7d / 1e6:.1f}M")
+    col_m6.metric("H Vol Today", f"{h_vol_today / 1e6:.1f}M")
 
     fig = _build_chart(df_ratio, _chart_colors(st.session_state.dark_mode))
     st.plotly_chart(fig, width="stretch", key="live_chart")
@@ -986,8 +998,8 @@ def _chart_panel(timeframe: str) -> None:
     with st.expander("Raw Ratio Data"):
         disp = df_ratio.copy()
         disp["date"] = pd.to_datetime(disp["date"]).dt.strftime("%Y-%m-%d")
-        disp["a_turnover"] = disp["a_turnover"].apply(lambda x: f"{x / 1e8:.2f}B" if x > 0 else "—")
-        disp["h_turnover"] = disp["h_turnover"].apply(lambda x: f"{x / 1e8:.2f}B" if x > 0 else "—")
+        disp["a_volume"] = disp["a_volume"].apply(lambda x: f"{x / 1e6:.1f}M" if x > 0 else "—")
+        disp["h_volume"] = disp["h_volume"].apply(lambda x: f"{x / 1e6:.1f}M" if x > 0 else "—")
         st.dataframe(disp, width="stretch", hide_index=True)
 
 

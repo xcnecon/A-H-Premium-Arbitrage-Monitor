@@ -100,6 +100,7 @@ def sync_all(
     today = date.today()
     prev_td_str = _prev_trading_day(today).strftime("%Y-%m-%d")
     is_weekday = today.weekday() < 5
+    logger.info("Sync boundary: today=%s prev_td=%s is_weekday=%s file=%s", today_str, prev_td_str, is_weekday, __file__)
 
     for hk, info in pairs.items():
         a_code = info["a_code"]
