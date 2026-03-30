@@ -34,8 +34,24 @@ from src.storage.kline_cache import (
 
 logger = logging.getLogger(__name__)
 
-_FUTU_DELAY: float = 0.5
 _A_DELAY: float = 1.0
+
+# Futu rate limit: max 60 request_history_kline calls per 30 seconds.
+# Use a global lock so all worker threads share one throttle.
+_FUTU_MIN_INTERVAL: float = 0.55  # ~1.8 req/s, safely under the 2 req/s cap
+_futu_lock = threading.Lock()
+_futu_last_call: float = 0.0
+
+
+def _futu_throttle() -> None:
+    """Block until enough time has passed since the last Futu kline request."""
+    global _futu_last_call
+    with _futu_lock:
+        now = time.monotonic()
+        wait = _FUTU_MIN_INTERVAL - (now - _futu_last_call)
+        if wait > 0:
+            time.sleep(wait)
+        _futu_last_call = time.monotonic()
 
 
 def sync_all(
@@ -329,6 +345,7 @@ def _sync_h_klines_hist(
             all_data: list[pd.DataFrame] = []
             page_req_key = None
             while True:
+                _futu_throttle()
                 ret, data, page_req_key = ctx.request_history_kline(
                     futu_code,
                     start=start,
@@ -375,7 +392,6 @@ def _sync_h_klines_hist(
                 done += 1
                 if progress_cb:
                     progress_cb(f"H-share {hk} {pairs[hk].get('name', '')}", done, len(tasks))
-            time.sleep(_FUTU_DELAY)
         return 0
 
     try:
