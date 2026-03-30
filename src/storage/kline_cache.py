@@ -15,12 +15,18 @@ logger = logging.getLogger(__name__)
 _write_lock = threading.Lock()
 
 
+_thread_local = threading.local()
+
+
 def _get_connection() -> sqlite3.Connection:
-    """Get SQLite connection, creating DB directory if needed."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.row_factory = sqlite3.Row
+    """Get thread-local persistent SQLite connection."""
+    conn = getattr(_thread_local, "conn", None)
+    if conn is None:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(DB_PATH), timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.row_factory = sqlite3.Row
+        _thread_local.conn = conn
     return conn
 
 
@@ -65,16 +71,13 @@ def save_kline(code: str, market: str, df: pd.DataFrame) -> int:
     ]
     with _write_lock:
         conn = _get_connection()
-        try:
-            conn.executemany(
-                f"INSERT OR REPLACE INTO {table} "
-                "(code, date, open, high, low, close, volume, turnover) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                rows,
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        conn.executemany(
+            f"INSERT OR REPLACE INTO {table} "
+            "(code, date, open, high, low, close, volume, turnover) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
     logger.info("Saved %d %s K-line rows for %s", len(rows), market.upper(), code)
     return len(rows)
 
@@ -93,20 +96,17 @@ def load_kline(code: str, market: str, start: str, end: str) -> pd.DataFrame:
     """
     table = _table_for_market(market)
     conn = _get_connection()
-    try:
-        cursor = conn.execute(
-            f"SELECT date, open, high, low, close, volume, turnover "
-            f"FROM {table} "
-            f"WHERE code = ? AND date >= ? AND date <= ? ORDER BY date",
-            (code, start, end),
-        )
-        rows = cursor.fetchall()
-        if not rows:
-            return pd.DataFrame()
-        data = [dict(r) for r in rows]
-        return pd.DataFrame(data)
-    finally:
-        conn.close()
+    cursor = conn.execute(
+        f"SELECT date, open, high, low, close, volume, turnover "
+        f"FROM {table} "
+        f"WHERE code = ? AND date >= ? AND date <= ? ORDER BY date",
+        (code, start, end),
+    )
+    rows = cursor.fetchall()
+    if not rows:
+        return pd.DataFrame()
+    data = [dict(r) for r in rows]
+    return pd.DataFrame(data)
 
 
 def get_last_sync_date(code: str, market: str) -> str | None:
@@ -120,15 +120,12 @@ def get_last_sync_date(code: str, market: str) -> str | None:
         Date string 'YYYY-MM-DD' or None.
     """
     conn = _get_connection()
-    try:
-        cursor = conn.execute(
-            "SELECT last_date FROM sync_meta WHERE code = ? AND market = ?",
-            (code, market.upper()),
-        )
-        row = cursor.fetchone()
-        return str(row["last_date"]) if row else None
-    finally:
-        conn.close()
+    cursor = conn.execute(
+        "SELECT last_date FROM sync_meta WHERE code = ? AND market = ?",
+        (code, market.upper()),
+    )
+    row = cursor.fetchone()
+    return str(row["last_date"]) if row else None
 
 
 def update_sync_meta(code: str, market: str, last_date: str) -> None:
@@ -141,15 +138,12 @@ def update_sync_meta(code: str, market: str, last_date: str) -> None:
     """
     with _write_lock:
         conn = _get_connection()
-        try:
-            conn.execute(
-                "INSERT OR REPLACE INTO sync_meta (code, market, last_date, updated_at) "
-                "VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
-                (code, market.upper(), last_date),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        conn.execute(
+            "INSERT OR REPLACE INTO sync_meta (code, market, last_date, updated_at) "
+            "VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+            (code, market.upper(), last_date),
+        )
+        conn.commit()
     logger.info("Updated sync_meta: %s/%s -> %s", code, market.upper(), last_date)
 
 
@@ -179,16 +173,13 @@ def save_premium_daily(hk_code: str, df: pd.DataFrame) -> int:
     ]
     with _write_lock:
         conn = _get_connection()
-        try:
-            conn.executemany(
-                "INSERT OR REPLACE INTO premium_daily "
-                "(hk_code, date, ratio_close, a_turnover, h_turnover, fx_rate) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                rows,
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        conn.executemany(
+            "INSERT OR REPLACE INTO premium_daily "
+            "(hk_code, date, ratio_close, a_turnover, h_turnover, fx_rate) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
     logger.info("Saved %d premium_daily rows for %s", len(rows), hk_code)
     return len(rows)
 
@@ -199,8 +190,9 @@ def get_premium_history(
 ) -> pd.DataFrame:
     """For each hk_code, return ratio_close at the Nth most recent trading day.
 
-    Uses ROW_NUMBER window function to rank dates in descending order,
-    then pivots the requested offsets into columns.
+    Runs individual LIMIT queries per code to leverage the (hk_code, date)
+    PRIMARY KEY index for fast reverse scans, instead of a full-table
+    ROW_NUMBER() window function.
 
     Args:
         hk_codes: List of HK stock codes.
@@ -215,34 +207,36 @@ def get_premium_history(
     if not hk_codes or not offsets:
         return pd.DataFrame()
 
-    placeholders = ",".join("?" for _ in hk_codes)
     offset_ints = sorted(set(offsets))
-
-    # Build the CASE columns dynamically
-    case_cols = ", ".join(
-        f"MAX(CASE WHEN rn = {n} THEN ratio_close END) AS ratio_{n}d" for n in offset_ints
-    )
-    rn_filter = ",".join(str(n) for n in offset_ints)
+    max_offset = max(offset_ints)
 
     sql = (
-        f"WITH ranked AS ("
-        f"  SELECT hk_code, date, ratio_close,"
-        f"         ROW_NUMBER() OVER (PARTITION BY hk_code ORDER BY date DESC) AS rn"
-        f"  FROM premium_daily"
-        f"  WHERE hk_code IN ({placeholders})"
-        f") "
-        f"SELECT hk_code, {case_cols} "
-        f"FROM ranked WHERE rn IN ({rn_filter}) "
-        f"GROUP BY hk_code"
+        "SELECT ratio_close FROM premium_daily "
+        "WHERE hk_code = ? ORDER BY date DESC LIMIT ?"
     )
 
+    data: list[dict] = []
     conn = _get_connection()
-    try:
-        cursor = conn.execute(sql, hk_codes)
-        rows = cursor.fetchall()
-        if not rows:
-            return pd.DataFrame()
-        data = [dict(r) for r in rows]
-        return pd.DataFrame(data)
-    finally:
-        conn.close()
+    for code in hk_codes:
+        cursor = conn.execute(sql, (code, max_offset))
+        ratios = [row["ratio_close"] for row in cursor.fetchall()]
+        row_dict: dict = {"hk_code": code}
+        for n in offset_ints:
+            idx = n - 1  # 1-based offset to 0-based index
+            row_dict[f"ratio_{n}d"] = ratios[idx] if idx < len(ratios) else None
+        data.append(row_dict)
+
+    if not data:
+        return pd.DataFrame()
+    return pd.DataFrame(data)
+
+
+def get_all_sync_meta() -> dict[tuple[str, str], str]:
+    """Load all sync_meta rows in one query.
+
+    Returns:
+        Dict mapping (code, market) -> last_date string.
+    """
+    conn = _get_connection()
+    cursor = conn.execute("SELECT code, market, last_date FROM sync_meta")
+    return {(row["code"], row["market"]): row["last_date"] for row in cursor.fetchall()}

@@ -4,9 +4,10 @@ import logging
 import re
 
 import requests
-from futu import RET_OK, OpenQuoteContext
+from futu import RET_OK
 
-from src.config.settings import A_SHARE_PROXY, OPEND_HOST, OPEND_PORT
+from src.config.settings import A_SHARE_PROXY
+from src.data.futu_ctx import get_quote_ctx
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def get_h_snapshot(code: str) -> dict | None:
         or None on failure.
     """
     futu_code = f"HK.{code}" if not code.startswith("HK.") else code
-    ctx = OpenQuoteContext(host=OPEND_HOST, port=OPEND_PORT)
+    ctx = get_quote_ctx()
     try:
         ret, data = ctx.get_market_snapshot([futu_code])
         if ret != RET_OK or data.empty:
@@ -52,8 +53,6 @@ def get_h_snapshot(code: str) -> dict | None:
     except Exception as e:
         logger.error("Futu snapshot error for %s: %s", futu_code, e)
         return None
-    finally:
-        ctx.close()
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +203,7 @@ def get_h_snapshots_batch(codes: list[str]) -> dict[str, dict]:
     if not codes:
         return {}
     futu_codes = [f"HK.{c}" if not c.startswith("HK.") else c for c in codes]
-    ctx = OpenQuoteContext(host=OPEND_HOST, port=OPEND_PORT)
+    ctx = get_quote_ctx()
     try:
         ret, data = ctx.get_market_snapshot(futu_codes)
         if ret != RET_OK:
@@ -226,8 +225,6 @@ def get_h_snapshots_batch(codes: list[str]) -> dict[str, dict]:
     except Exception as e:
         logger.error("Futu batch snapshot error: %s", e)
         return {}
-    finally:
-        ctx.close()
 
 
 def get_a_snapshots_batch(codes: list[str]) -> dict[str, dict]:

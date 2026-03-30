@@ -7,9 +7,9 @@ for every pair in the mapping, using live snapshot data and FX rates.
 import logging
 
 import pandas as pd
-from futu import RET_OK, OpenQuoteContext
+from futu import RET_OK
 
-from src.config.settings import OPEND_HOST, OPEND_PORT
+from src.data.futu_ctx import get_quote_ctx
 from src.data.ah_mapping import get_all_pairs
 from src.data.fx_client import get_fx_latest
 from src.data.realtime import get_a_snapshots_batch
@@ -53,9 +53,9 @@ def _safe_vol_ratio(h_turnover: float, a_turnover: float, fx: float) -> float | 
     return (h_turnover * fx) / a_turnover
 
 
-def _fetch_all_h_snapshots(hk_codes: list[str], chunk_size: int = 30) -> dict[str, dict]:
-    """Fetch H-share snapshots using ONE Futu connection, chunked to isolate bad codes."""
-    ctx = OpenQuoteContext(host=OPEND_HOST, port=OPEND_PORT)
+def _fetch_all_h_snapshots(hk_codes: list[str], chunk_size: int = 400) -> dict[str, dict]:
+    """Fetch H-share snapshots using the singleton Futu connection, chunked to isolate bad codes."""
+    ctx = get_quote_ctx()
     result: dict[str, dict] = {}
     try:
         for i in range(0, len(hk_codes), chunk_size):
@@ -78,8 +78,6 @@ def _fetch_all_h_snapshots(hk_codes: list[str], chunk_size: int = 30) -> dict[st
                 logger.warning("Futu chunk %d–%d failed: %s", i, i + len(chunk), str(data)[:100])
     except Exception as e:
         logger.error("Futu screener fetch error: %s", e)
-    finally:
-        ctx.close()
     logger.info("Fetched %d/%d H-share snapshots", len(result), len(hk_codes))
     return result
 

@@ -25,6 +25,7 @@ from src.data.akshare_client import get_a_kline
 from src.data.fx_client import get_fx_latest, get_fx_range
 from src.data.realtime import get_a_snapshots_batch
 from src.storage.kline_cache import (
+    get_all_sync_meta,
     get_last_sync_date,
     load_kline,
     save_kline,
@@ -102,10 +103,11 @@ def sync_all(
     is_weekday = today.weekday() < 5
     logger.info("Sync boundary: today=%s prev_td=%s is_weekday=%s file=%s", today_str, prev_td_str, is_weekday, __file__)
 
+    all_meta = get_all_sync_meta()
     for hk, info in pairs.items():
         a_code = info["a_code"]
-        last_h = get_last_sync_date(hk, "H")
-        last_a = get_last_sync_date(a_code, "A")
+        last_h = all_meta.get((hk, "H"))
+        last_a = all_meta.get((a_code, "A"))
 
         if last_h and last_h >= today_str and last_a and last_a >= today_str:
             continue  # fully synced

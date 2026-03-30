@@ -355,13 +355,6 @@ st.set_page_config(
 # ─── Theme CSS ───
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
-st.markdown(
-    '<link href="https://fonts.googleapis.com/css2?'
-    "family=Inter:wght@300..700"
-    "&family=JetBrains+Mono:wght@400..700"
-    '&display=swap" rel="stylesheet">',
-    unsafe_allow_html=True,
-)
 st.markdown(_build_theme_css(st.session_state.dark_mode), unsafe_allow_html=True)
 
 
@@ -421,7 +414,7 @@ if st.session_state.get("sync_error"):
 TIMEFRAMES = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
 
 
-@st.cache_data(ttl=4, show_spinner="Fetching data for all A/H pairs...")
+@st.cache_data(ttl=25, show_spinner="Fetching data for all A/H pairs...")
 def _cached_screener() -> pd.DataFrame:
     """Cached screener with historical premium changes."""
     df = compute_screener_table()
@@ -494,7 +487,7 @@ def _watchlist_panel() -> None:
     a_codes = [item["a_code"] for item in watchlist]
 
     cache_age = time.time() - st.session_state.get("_snap_ts", 0)
-    if cache_age < 4 and "_h_snaps" in st.session_state and "_a_snaps" in st.session_state:
+    if cache_age < 8 and "_h_snaps" in st.session_state and "_a_snaps" in st.session_state:
         h_snaps = st.session_state["_h_snaps"]
         a_snaps = st.session_state["_a_snaps"]
     else:
@@ -836,7 +829,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
 
 
 # ─── Chart fragment: data loading + live updates + rendering ───
-@st.fragment(run_every=timedelta(seconds=5) if _is_market_hours() else None)
+@st.fragment(run_every=timedelta(seconds=10) if _is_market_hours() else None)
 def _chart_panel(timeframe: str) -> None:
     display_hk = st.session_state.get("selected_hk", "")
     if not display_hk:
@@ -1044,7 +1037,7 @@ with tab_chart:
     _chart_panel(timeframe)
 
 
-@st.fragment(run_every=timedelta(seconds=5) if _is_market_hours() else None)
+@st.fragment(run_every=timedelta(seconds=20) if _is_market_hours() else None)
 def _screener_panel() -> None:
     df_scr = _cached_screener()
 
