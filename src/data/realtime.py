@@ -6,13 +6,12 @@ import re
 import requests
 from futu import RET_OK, OpenQuoteContext
 
-from src.config.settings import OPEND_HOST, OPEND_PORT
+from src.config.settings import A_SHARE_PROXY, OPEND_HOST, OPEND_PORT
 
 logger = logging.getLogger(__name__)
 
-_REQUEST_TIMEOUT: float = 2.0
-# No proxy for real-time Sina/Tencent — HK direct connection is faster
-_PROXIES: dict | None = None
+_REQUEST_TIMEOUT: float = 5.0
+_PROXIES: dict | None = A_SHARE_PROXY
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +253,7 @@ def get_a_snapshots_batch(codes: list[str]) -> dict[str, dict]:
         symbols = [_a_code_to_sina_symbol(c) for c in chunk]
         url = f"http://hq.sinajs.cn/list={','.join(symbols)}"
         try:
-            resp = requests.get(url, headers=headers, timeout=8.0, proxies=_PROXIES)
+            resp = requests.get(url, headers=headers, timeout=12.0, proxies=_PROXIES)
             resp.encoding = "gb2312"
 
             for line in resp.text.strip().split("\n"):

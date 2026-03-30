@@ -1,4 +1,6 @@
+import contextlib
 import logging
+import os
 import time
 
 import akshare as ak
@@ -10,11 +12,37 @@ MAX_RETRIES = 2
 RETRY_DELAY = 2.0
 
 
+@contextlib.contextmanager
+def _a_share_proxy_env():
+    """Temporarily set HTTP_PROXY env vars for A-share data sources.
+
+    AKShare uses ``requests`` internally with no proxy parameter,
+    so we inject the proxy via environment variables scoped to the call.
+    """
+    proxy_url: str | None = os.getenv("A_SHARE_PROXY_URL")
+    if not proxy_url:
+        yield
+        return
+    keys = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+    old = {k: os.environ.get(k) for k in keys}
+    try:
+        for k in keys:
+            os.environ[k] = proxy_url
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def _with_retry(func, *args, **kwargs):
-    """Retry wrapper for AKShare calls."""
+    """Retry wrapper for AKShare calls (runs through A-share proxy)."""
     for attempt in range(MAX_RETRIES + 1):
         try:
-            return func(*args, **kwargs)
+            with _a_share_proxy_env():
+                return func(*args, **kwargs)
         except Exception as e:
             if attempt < MAX_RETRIES:
                 logger.warning("Retry %d/%d for %s: %s", attempt + 1, MAX_RETRIES, func.__name__, e)
