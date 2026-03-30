@@ -389,17 +389,31 @@ if _qp_del:
 
 # ─── Startup sync: download/update historical K-lines (once per session) ───
 if "sync_done" not in st.session_state:
-    with st.spinner("Syncing market data (K-lines + FX rates)..."):
-        try:
+    try:
+        with st.spinner("Syncing market data (K-lines + FX rates)..."):
             summary = sync_all()
-            st.session_state.sync_done = True
-            st.session_state.sync_ok = True
-            logger.info("Sync complete: %s", summary)
-        except Exception as e:
-            logger.error("Sync failed: %s", e)
-            st.session_state.sync_done = True
-            st.session_state.sync_ok = False
-            st.session_state["sync_error"] = str(e)
+        if summary.get("today_deferred"):
+            # Only today missing — sync_all returned instantly above.
+            # Persist snapshots to kline cache in background (non-blocking)
+            # so the *next* startup is also instant.
+            import threading
+            from src.data.sync import sync_today_snapshots
+
+            threading.Thread(
+                target=sync_today_snapshots, daemon=True, name="snapshot-sync"
+            ).start()
+            logger.info(
+                "Today-only: deferred %d pairs to background snapshot sync",
+                summary["today_deferred"],
+            )
+        st.session_state.sync_done = True
+        st.session_state.sync_ok = True
+        logger.info("Sync complete: %s", summary)
+    except Exception as e:
+        logger.error("Sync failed: %s", e)
+        st.session_state.sync_done = True
+        st.session_state.sync_ok = False
+        st.session_state["sync_error"] = str(e)
 
 if st.session_state.get("sync_error"):
     st.warning(f"Data sync failed: {st.session_state['sync_error']}. Showing cached data.")

@@ -36,6 +36,18 @@ logger = logging.getLogger(__name__)
 
 _A_DELAY: float = 1.0
 
+
+def _prev_trading_day(d: date) -> date:
+    """Return the most recent trading day before *d* (skips weekends).
+
+    Does not account for public holidays — worst case is a harmless
+    snapshot sync on a holiday (returns prev-close, no harm done).
+    """
+    prev = d - timedelta(days=1)
+    while prev.weekday() >= 5:  # Sat=5, Sun=6
+        prev -= timedelta(days=1)
+    return prev
+
 # Futu rate limit: max 60 request_history_kline calls per 30 seconds.
 # Use a global lock so all worker threads share one throttle.
 _FUTU_MIN_INTERVAL: float = 0.55  # ~1.8 req/s, safely under the 2 req/s cap
@@ -82,7 +94,12 @@ def sync_all(
     need_gap_a: list[str] = []  # synced but missed days → historical delta
     need_today: list[str] = []  # only missing today → snapshot (zero quota)
 
-    yesterday_str = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    # Use previous trading day (skip weekends) as the gap boundary.
+    # If last_sync >= prev_trading_day, only today is missing → free snapshot.
+    # If last_sync < prev_trading_day, actual trading days were missed → historical API.
+    today = date.today()
+    prev_td_str = _prev_trading_day(today).strftime("%Y-%m-%d")
+    is_weekday = today.weekday() < 5
 
     for hk, info in pairs.items():
         a_code = info["a_code"]
@@ -95,15 +112,15 @@ def sync_all(
         # H-share classification
         if not last_h:
             need_full_h.append(hk)
-        elif last_h < yesterday_str:
-            need_gap_h.append(hk)  # missed >1 day, need historical API
-        elif last_h < today_str:
-            need_today.append(hk)  # only missing today
+        elif last_h < prev_td_str:
+            need_gap_h.append(hk)  # missed trading days, need historical API
+        elif last_h < today_str and is_weekday:
+            need_today.append(hk)  # only missing today (weekday) → snapshot
 
         # A-share classification
         if not last_a:
             need_full_a.append(hk)
-        elif last_a < yesterday_str:
+        elif last_a < prev_td_str:
             need_gap_a.append(hk)
 
     skipped = (
@@ -132,6 +149,24 @@ def sync_all(
             "h_fetched": 0,
             "a_fetched": 0,
             "premium_computed": 0,
+            "today_deferred": 0,
+            "errors": [],
+            "elapsed_s": 0.0,
+        }
+
+    # Only today missing — skip blocking sync entirely.
+    # The caller should run sync_today_snapshots() in the background.
+    if not need_full_h and not need_gap_h and not need_full_a and not need_gap_a:
+        logger.info(
+            "Only today missing for %d pairs — deferring to background snapshot sync",
+            len(need_today),
+        )
+        return {
+            "total_pairs": len(pairs),
+            "h_fetched": 0,
+            "a_fetched": 0,
+            "premium_computed": 0,
+            "today_deferred": len(need_today),
             "errors": [],
             "elapsed_s": 0.0,
         }
@@ -211,6 +246,32 @@ def sync_all(
     }
     logger.info("Sync complete: %s", summary)
     return summary
+
+
+def sync_today_snapshots() -> int:
+    """Persist today's closing snapshots to the K-line cache for all pairs.
+
+    Designed to be called in a background thread after the dashboard loads,
+    so startup is not blocked.  Also safe to call after market close to lock
+    in the day's closing bar for fast next-day startup.
+
+    Returns:
+        Number of pairs successfully updated.
+    """
+    today = date.today()
+    if today.weekday() >= 5:
+        logger.info("Weekend — skipping snapshot persistence")
+        return 0
+    pairs = get_all_pairs()
+    errors: list[str] = []
+    count = _sync_today_from_snapshots(pairs, today.strftime("%Y-%m-%d"), errors)
+    if errors:
+        logger.warning("Snapshot sync had %d errors: %s", len(errors), errors[:5])
+    # Recompute premium for today
+    if count > 0:
+        today_str = today.strftime("%Y-%m-%d")
+        _recompute_premium(pairs, today_str, today_str)
+    return count
 
 
 def _sync_today_from_snapshots(
