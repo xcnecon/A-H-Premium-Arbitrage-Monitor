@@ -491,12 +491,23 @@ def _watchlist_panel() -> None:
         h_snaps = st.session_state["_h_snaps"]
         a_snaps = st.session_state["_a_snaps"]
     else:
-        h_snaps = get_h_snapshots_batch(hk_codes)
-        a_snaps = get_a_snapshots_batch(a_codes)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fut_h = pool.submit(get_h_snapshots_batch, hk_codes)
+            fut_a = pool.submit(get_a_snapshots_batch, a_codes)
+            h_snaps = fut_h.result(timeout=10)
+            a_snaps = fut_a.result(timeout=10)
         st.session_state["_h_snaps"] = h_snaps
         st.session_state["_a_snaps"] = a_snaps
         st.session_state["_snap_ts"] = time.time()
-    fx = get_fx_latest()
+
+    # FX rate barely changes intraday — cache for 5 min in session_state
+    fx_age = time.time() - st.session_state.get("_fx_ts", 0)
+    if fx_age < 300 and "_fx_rate" in st.session_state:
+        fx = st.session_state["_fx_rate"]
+    else:
+        fx = get_fx_latest()
+        st.session_state["_fx_rate"] = fx
+        st.session_state["_fx_ts"] = time.time()
 
     # Build row data
     rows: list[dict] = []
@@ -896,10 +907,9 @@ def _chart_panel(timeframe: str) -> None:
     if st.session_state.get("_cache_key") != cache_key:
         return
 
-    df_ratio = st.session_state["df_ratio"].copy()
     hk = st.session_state["hk_code"]
     a_cd = st.session_state["a_code_display"]
-    fx = st.session_state["fx_spot"]
+    fx = st.session_state.get("_fx_rate") or st.session_state["fx_spot"]
 
     h_snaps_cache = st.session_state.get("_h_snaps", {})
     a_snaps_cache = st.session_state.get("_a_snaps", {})
@@ -912,52 +922,66 @@ def _chart_panel(timeframe: str) -> None:
         h_snap = get_h_snapshot(hk)
         a_snap = get_a_snapshot(a_cd)
 
+    # Track whether data actually changed to skip expensive chart rebuild
+    _prev_h = st.session_state.get("_chart_h_price")
+    _prev_a = st.session_state.get("_chart_a_price")
+
+    df_ratio = st.session_state["df_ratio"]
+    data_changed = False
+
     if h_snap and a_snap and h_snap["price"] > 0 and a_snap["price"] > 0:
-        today = date.today()
-        last_date = df_ratio.iloc[-1]["date"]
-        if hasattr(last_date, "date"):
-            last_date = last_date.date()
-        elif isinstance(last_date, str):
-            last_date = datetime.strptime(str(last_date)[:10], "%Y-%m-%d").date()
+        # Skip update if prices are identical to last rerun
+        if h_snap["price"] != _prev_h or a_snap["price"] != _prev_a:
+            data_changed = True
+            df_ratio = df_ratio.copy()
+            st.session_state["_chart_h_price"] = h_snap["price"]
+            st.session_state["_chart_a_price"] = a_snap["price"]
 
-        h_cny = h_snap["price"] * fx
-        live_ratio = h_cny / a_snap["price"]
-        live_open = (h_snap["open"] * fx) / a_snap["open"] if a_snap["open"] > 0 else live_ratio
-        live_high = (
-            max(live_ratio, (h_snap["high"] * fx) / a_snap["low"])
-            if a_snap["low"] > 0
-            else live_ratio
-        )
-        live_low = (
-            min(live_ratio, (h_snap["low"] * fx) / a_snap["high"])
-            if a_snap["high"] > 0
-            else live_ratio
-        )
+            today = date.today()
+            last_date = df_ratio.iloc[-1]["date"]
+            if hasattr(last_date, "date"):
+                last_date = last_date.date()
+            elif isinstance(last_date, str):
+                last_date = datetime.strptime(str(last_date)[:10], "%Y-%m-%d").date()
 
-        if last_date == today:
-            idx = df_ratio.index[-1]
-            df_ratio.at[idx, "close"] = live_ratio
-            df_ratio.at[idx, "high"] = max(df_ratio.at[idx, "high"], live_high)
-            df_ratio.at[idx, "low"] = min(df_ratio.at[idx, "low"], live_low)
-            df_ratio.at[idx, "a_volume"] = a_snap["volume"]
-            df_ratio.at[idx, "h_volume"] = h_snap["volume"]
-        else:
-            new_row = pd.DataFrame(
-                [
-                    {
-                        "date": pd.Timestamp(today),
-                        "open": live_open,
-                        "high": live_high,
-                        "low": live_low,
-                        "close": live_ratio,
-                        "a_volume": a_snap["volume"],
-                        "h_volume": h_snap["volume"],
-                    }
-                ]
+            h_cny = h_snap["price"] * fx
+            live_ratio = h_cny / a_snap["price"]
+            live_open = (h_snap["open"] * fx) / a_snap["open"] if a_snap["open"] > 0 else live_ratio
+            live_high = (
+                max(live_ratio, (h_snap["high"] * fx) / a_snap["low"])
+                if a_snap["low"] > 0
+                else live_ratio
             )
-            df_ratio = pd.concat([df_ratio, new_row], ignore_index=True)
+            live_low = (
+                min(live_ratio, (h_snap["low"] * fx) / a_snap["high"])
+                if a_snap["high"] > 0
+                else live_ratio
+            )
 
-        st.session_state["df_ratio"] = df_ratio
+            if last_date == today:
+                idx = df_ratio.index[-1]
+                df_ratio.at[idx, "close"] = live_ratio
+                df_ratio.at[idx, "high"] = max(df_ratio.at[idx, "high"], live_high)
+                df_ratio.at[idx, "low"] = min(df_ratio.at[idx, "low"], live_low)
+                df_ratio.at[idx, "a_volume"] = a_snap["volume"]
+                df_ratio.at[idx, "h_volume"] = h_snap["volume"]
+            else:
+                new_row = pd.DataFrame(
+                    [
+                        {
+                            "date": pd.Timestamp(today),
+                            "open": live_open,
+                            "high": live_high,
+                            "low": live_low,
+                            "close": live_ratio,
+                            "a_volume": a_snap["volume"],
+                            "h_volume": h_snap["volume"],
+                        }
+                    ]
+                )
+                df_ratio = pd.concat([df_ratio, new_row], ignore_index=True)
+
+            st.session_state["df_ratio"] = df_ratio
 
     # ── Render metrics + chart ──
     latest = df_ratio.iloc[-1]
@@ -985,7 +1009,12 @@ def _chart_panel(timeframe: str) -> None:
     col_m5.metric("7D H Avg Vol", f"{h_vol_avg_7d / 1e6:.1f}M")
     col_m6.metric("H Vol Today", f"{h_vol_today / 1e6:.1f}M")
 
-    fig = _build_chart(df_ratio, _chart_colors(st.session_state.dark_mode))
+    # Reuse cached figure if prices haven't changed (avoids expensive rebuild + serialization)
+    if data_changed or "_cached_fig" not in st.session_state:
+        fig = _build_chart(df_ratio, _chart_colors(st.session_state.dark_mode))
+        st.session_state["_cached_fig"] = fig
+    else:
+        fig = st.session_state["_cached_fig"]
     st.plotly_chart(fig, width="stretch", key="live_chart")
 
     with st.expander("Raw Ratio Data"):
