@@ -35,7 +35,8 @@ from src.storage.kline_cache import (
 
 logger = logging.getLogger(__name__)
 
-_A_DELAY: float = 1.0
+# Module-level lock: prevents concurrent background syncs from overlapping
+_bg_sync_lock = threading.Lock()
 
 
 def _prev_trading_day(d: date) -> date:
@@ -69,6 +70,8 @@ def _futu_throttle() -> None:
 
 def sync_all(
     progress_cb: Callable[[str, int, int], None] | None = None,
+    *,
+    _defer_ok: bool = True,
 ) -> dict[str, Any]:
     """Download missing K-line data for all A/H pairs and compute premium.
 
@@ -77,6 +80,9 @@ def sync_all(
 
     Args:
         progress_cb: Optional callback(message, current, total) for progress.
+        _defer_ok: If True (default), defer gap+today sync to background
+            when no first-time full downloads are needed.  Set False when
+            running from a background thread to do the actual work.
 
     Returns:
         Summary dict.
@@ -95,13 +101,19 @@ def sync_all(
     need_gap_a: list[str] = []  # synced but missed days → historical delta
     need_today: list[str] = []  # only missing today → snapshot (zero quota)
 
-    # Use previous trading day (skip weekends) as the gap boundary.
-    # If last_sync >= prev_trading_day, only today is missing → free snapshot.
-    # If last_sync < prev_trading_day, actual trading days were missed → historical API.
+    # Gap boundary: 2 trading days ago.  If only 0-1 trading days are missing
+    # we can fill them from batch snapshots (today OHLCV + prev_close for
+    # yesterday) — 4 HTTP calls total instead of 169 per-stock calls.
+    # Only multi-day gaps (2+ trading days) require the historical API.
     today = date.today()
-    prev_td_str = _prev_trading_day(today).strftime("%Y-%m-%d")
+    prev_td = _prev_trading_day(today)
+    prev_td_str = prev_td.strftime("%Y-%m-%d")
+    prev_prev_td_str = _prev_trading_day(prev_td).strftime("%Y-%m-%d")
     is_weekday = today.weekday() < 5
-    logger.info("Sync boundary: today=%s prev_td=%s is_weekday=%s file=%s", today_str, prev_td_str, is_weekday, __file__)
+    logger.info(
+        "Sync boundary: today=%s prev_td=%s prev_prev_td=%s is_weekday=%s",
+        today_str, prev_td_str, prev_prev_td_str, is_weekday,
+    )
 
     all_meta = get_all_sync_meta()
     for hk, info in pairs.items():
@@ -115,16 +127,18 @@ def sync_all(
         # H-share classification
         if not last_h:
             need_full_h.append(hk)
-        elif last_h < prev_td_str:
-            need_gap_h.append(hk)  # missed trading days, need historical API
+        elif last_h < prev_prev_td_str:
+            need_gap_h.append(hk)  # 2+ day gap → historical API
         elif last_h < today_str and is_weekday:
-            need_today.append(hk)  # only missing today (weekday) → snapshot
+            need_today.append(hk)  # 0-1 day gap → batch snapshot
 
         # A-share classification
         if not last_a:
             need_full_a.append(hk)
-        elif last_a < prev_td_str:
-            need_gap_a.append(hk)
+        elif last_a < prev_prev_td_str:
+            need_gap_a.append(hk)  # 2+ day gap → historical API
+        elif last_a < today_str and is_weekday and hk not in need_today:
+            need_today.append(hk)  # 0-1 day gap → batch snapshot
 
     skipped = (
         len(pairs)
@@ -157,11 +171,13 @@ def sync_all(
             "elapsed_s": 0.0,
         }
 
-    # Only today missing — skip blocking sync entirely.
-    # The caller should run sync_today_snapshots() in the background.
-    if not need_full_h and not need_gap_h and not need_full_a and not need_gap_a:
+    # No first-time full downloads needed — defer everything to background.
+    # The caller should run sync_background() in a thread.
+    if _defer_ok and not need_full_h and not need_full_a:
+        gap_count = len(need_gap_h) + len(need_gap_a)
         logger.info(
-            "Only today missing for %d pairs — deferring to background snapshot sync",
+            "Deferring %d gap + %d today to background sync",
+            gap_count,
             len(need_today),
         )
         return {
@@ -170,6 +186,7 @@ def sync_all(
             "a_fetched": 0,
             "premium_computed": 0,
             "today_deferred": len(need_today),
+            "gap_deferred": gap_count,
             "errors": [],
             "elapsed_s": 0.0,
         }
@@ -277,15 +294,41 @@ def sync_today_snapshots() -> int:
     return count
 
 
+def sync_background() -> dict[str, Any]:
+    """Run gap-fill + today sync without deferring.  For background threads.
+
+    Re-runs the full classification and executes any gap or today syncs that
+    ``sync_all()`` deferred on the main thread.  Uses a module-level lock so
+    only one background sync can run at a time.
+    """
+    if not _bg_sync_lock.acquire(blocking=False):
+        logger.info("Background sync already running, skipping")
+        return {"skipped": True}
+    try:
+        return sync_all(_defer_ok=False)
+    except Exception as e:
+        logger.error("Background sync failed: %s", e)
+        return {"error": str(e)}
+    finally:
+        _bg_sync_lock.release()
+
+
 def _sync_today_from_snapshots(
     pairs: dict[str, dict],
     today_str: str,
     errors: list[str],
 ) -> int:
-    """Update today's K-line row using market snapshots — zero quota consumed.
+    """Update today's (and optionally yesterday's) K-line from batch snapshots.
 
-    Uses the same batch snapshot APIs that the screener/watchlist already call.
-    Converts snapshot OHLCV into a single K-line row per stock.
+    Uses batch snapshot APIs — ~4 HTTP calls for all 169 stocks instead of
+    169 individual historical API calls.
+
+    Today: full OHLCV from snapshot.
+    Yesterday (prev trading day): close from ``prev_close`` field.  OHLV are
+    approximated as prev_close; volume/turnover are zero.  This is sufficient
+    for premium calculation (which only uses close).  The candlestick for that
+    day shows a flat bar — acceptable since the real OHLCV can be backfilled
+    later if needed.
     """
     from src.calc.screener import _fetch_all_h_snapshots
 
@@ -297,49 +340,68 @@ def _sync_today_from_snapshots(
     fx = get_fx_latest()
     count = 0
 
+    prev_td_str = _prev_trading_day(date.today()).strftime("%Y-%m-%d")
+    all_meta = get_all_sync_meta()
+
     for hk in hk_codes:
         info = pairs[hk]
         a_code = info["a_code"]
 
-        # H-share snapshot → kline row
+        # ── H-share ──
         h = h_snaps.get(hk)
+        h_prev: float = 0
         if h and h.get("price", 0) > 0:
-            df_h = pd.DataFrame(
-                [
-                    {
-                        "date": today_str,
-                        "open": h.get("open", h["price"]),
-                        "high": h.get("high", h["price"]),
-                        "low": h.get("low", h["price"]),
-                        "close": h["price"],
-                        "volume": h.get("volume", 0),
-                        "turnover": h.get("turnover", 0),
-                    }
-                ]
-            )
-            save_kline(hk, "H", df_h)
-            update_sync_meta(hk, "H", today_str)
-
-            # Also compute today's premium
-            a = a_snaps.get(a_code)
-            if a and a.get("price", 0) > 0:
-                ratio = (h["price"] * fx) / a["price"]
-                h_turnover_cny = h.get("turnover", 0) * fx
-                df_prem = pd.DataFrame(
+            save_kline(
+                hk,
+                "H",
+                pd.DataFrame(
                     [
                         {
                             "date": today_str,
-                            "ratio_close": ratio,
-                            "a_turnover": a.get("turnover", 0),
-                            "h_turnover": h_turnover_cny,
-                            "fx_rate": fx,
+                            "open": h.get("open", h["price"]),
+                            "high": h.get("high", h["price"]),
+                            "low": h.get("low", h["price"]),
+                            "close": h["price"],
+                            "volume": h.get("volume", 0),
+                            "turnover": h.get("turnover", 0),
                         }
                     ]
-                )
-                save_premium_daily(hk, df_prem)
+                ),
+            )
+            update_sync_meta(hk, "H", today_str)
 
-                # Save A-share kline too
-                df_a = pd.DataFrame(
+            # Yesterday: fill from prev_close only if no data exists yet
+            last_h = all_meta.get((hk, "H"))
+            h_prev = h.get("prev_close", 0)
+            if h_prev > 0 and (not last_h or last_h < prev_td_str):
+                existing = load_kline(hk, "H", prev_td_str, prev_td_str)
+                if existing.empty:
+                    save_kline(
+                        hk,
+                        "H",
+                        pd.DataFrame(
+                            [
+                                {
+                                    "date": prev_td_str,
+                                    "open": h_prev,
+                                    "high": h_prev,
+                                    "low": h_prev,
+                                    "close": h_prev,
+                                    "volume": 0,
+                                    "turnover": 0,
+                                }
+                            ]
+                        ),
+                    )
+
+        # ── A-share (independent of H-share success) ──
+        a = a_snaps.get(a_code)
+        a_prev: float = 0
+        if a and a.get("price", 0) > 0:
+            save_kline(
+                a_code,
+                "A",
+                pd.DataFrame(
                     [
                         {
                             "date": today_str,
@@ -351,10 +413,73 @@ def _sync_today_from_snapshots(
                             "turnover": a.get("turnover", 0),
                         }
                     ]
-                )
-                save_kline(a_code, "A", df_a)
-                update_sync_meta(a_code, "A", today_str)
+                ),
+            )
+            update_sync_meta(a_code, "A", today_str)
 
+            last_a = all_meta.get((a_code, "A"))
+            a_prev = a.get("prev_close", 0)
+            if a_prev > 0 and (not last_a or last_a < prev_td_str):
+                existing = load_kline(a_code, "A", prev_td_str, prev_td_str)
+                if existing.empty:
+                    save_kline(
+                        a_code,
+                        "A",
+                        pd.DataFrame(
+                            [
+                                {
+                                    "date": prev_td_str,
+                                    "open": a_prev,
+                                    "high": a_prev,
+                                    "low": a_prev,
+                                    "close": a_prev,
+                                    "volume": 0,
+                                    "turnover": 0,
+                                }
+                            ]
+                        ),
+                    )
+
+        # ── Premium (requires both H and A) ──
+        if (
+            h
+            and h.get("price", 0) > 0
+            and a
+            and a.get("price", 0) > 0
+        ):
+            ratio = (h["price"] * fx) / a["price"]
+            h_turnover_cny = h.get("turnover", 0) * fx
+            save_premium_daily(
+                hk,
+                pd.DataFrame(
+                    [
+                        {
+                            "date": today_str,
+                            "ratio_close": ratio,
+                            "a_turnover": a.get("turnover", 0),
+                            "h_turnover": h_turnover_cny,
+                            "fx_rate": fx,
+                        }
+                    ]
+                ),
+            )
+
+            if h_prev > 0 and a_prev > 0:
+                ratio_prev = (h_prev * fx) / a_prev
+                save_premium_daily(
+                    hk,
+                    pd.DataFrame(
+                        [
+                            {
+                                "date": prev_td_str,
+                                "ratio_close": ratio_prev,
+                                "a_turnover": 0,
+                                "h_turnover": 0,
+                                "fx_rate": fx,
+                            }
+                        ]
+                    ),
+                )
             count += 1
 
     logger.info("Snapshot daily update: %d pairs updated", count)

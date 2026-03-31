@@ -383,22 +383,22 @@ if _qp_del:
 # ─── Startup sync: download/update historical K-lines (once per session) ───
 if "sync_done" not in st.session_state:
     try:
-        with st.spinner("Syncing market data (K-lines + FX rates)..."):
+        with st.spinner("Syncing market data..."):
             summary = sync_all()
-        if summary.get("today_deferred"):
-            # Only today missing — sync_all returned instantly above.
-            # Persist snapshots to kline cache in background (non-blocking)
-            # so the *next* startup is also instant.
+        deferred = summary.get("today_deferred", 0) + summary.get("gap_deferred", 0)
+        if deferred:
+            # Gap-fill and/or today missing — sync_all returned instantly.
+            # Do the real work in a background thread so the dashboard loads now.
             import threading
-            from src.data.sync import sync_today_snapshots
+            from src.data.sync import sync_background
 
             threading.Thread(
-                target=sync_today_snapshots, daemon=True, name="snapshot-sync"
+                target=sync_background, daemon=True, name="bg-sync"
             ).start()
-            logger.info(
-                "Today-only: deferred %d pairs to background snapshot sync",
-                summary["today_deferred"],
-            )
+            logger.info("Deferred %d pairs to background sync", deferred)
+        elif summary.get("history_backfill", 0) > 0:
+            # First-time full downloads — sync_all already did them (blocking).
+            logger.info("Full sync complete: %s", summary)
         st.session_state.sync_done = True
         st.session_state.sync_ok = True
         logger.info("Sync complete: %s", summary)
