@@ -475,7 +475,7 @@ def _on_ticker_change() -> None:
 
 
 # ─── Sidebar: Watchlist ───
-@st.fragment(run_every=timedelta(seconds=5) if _is_market_hours() else None)
+@st.fragment(run_every=timedelta(seconds=5))
 def _watchlist_panel() -> None:
     watchlist = get_watchlist()
     if not watchlist:
@@ -845,7 +845,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
 
 
 # ─── Chart fragment: data loading + live updates + rendering ───
-@st.fragment(run_every=timedelta(seconds=10) if _is_market_hours() else None)
+@st.fragment(run_every=timedelta(seconds=10))
 def _chart_panel(timeframe: str) -> None:
     display_hk = st.session_state.get("selected_hk", "")
     if not display_hk:
@@ -1075,7 +1075,7 @@ with tab_chart:
     _chart_panel(timeframe)
 
 
-@st.fragment(run_every=timedelta(seconds=20) if _is_market_hours() else None)
+@st.fragment(run_every=timedelta(seconds=20))
 def _screener_panel() -> None:
     df_scr = _cached_screener()
 
