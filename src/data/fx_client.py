@@ -13,6 +13,7 @@ Transient failures are retried up to 2 times with backoff.
 
 import asyncio
 import logging
+import threading
 import time
 from datetime import date, datetime, timedelta
 
@@ -28,6 +29,14 @@ logger = logging.getLogger(__name__)
 # keeps TLS connections alive and avoids repeated TLS handshakes.
 
 _yf_session = None
+
+# ─── Cross-call coordination ───
+# Without these, the screener (TTL 25s), live fragment (every 5s) and chart
+# panel can all hit a cold cache simultaneously and each fire its own 30s
+# Yahoo retry chain — flooding logs and stalling the UI for ~minute.
+_fx_fetch_lock = threading.Lock()
+_yahoo_cooldown_until = 0.0  # epoch seconds; skip Yahoo entirely while in cooldown
+_YAHOO_COOLDOWN_AFTER_429 = 300.0  # 5 minutes — long enough for Yahoo's per-cookie limit to relax
 
 
 def _get_yf_session():
@@ -47,28 +56,6 @@ def _get_yf_session():
     return _yf_session
 
 
-def _clear_yf_cookies() -> None:
-    """Clear yfinance's cached cookies so the next request gets a fresh session.
-
-    Yahoo tracks rate limits via the A3 cookie. Clearing it is equivalent
-    to a fresh browser — the rate limit is tied to the cookie, not the IP.
-    Uses yfinance's own cache API to avoid corrupting the DB.
-    """
-    global _yf_session
-    try:
-        from yfinance.cache import get_cookie_cache
-
-        cc = get_cookie_cache()
-        # store(strategy, None) deletes the cookie row cleanly
-        cc.store("curlCffi", None)
-        logger.info("Cleared yfinance cookie via cache API")
-    except Exception as e:
-        logger.warning("Failed to clear yfinance cookies via API: %s", e)
-
-    # Force recreate session on next call
-    _yf_session = None
-
-
 def _ensure_event_loop() -> None:
     """Ensure the current thread has an open asyncio event loop.
 
@@ -84,21 +71,28 @@ def _ensure_event_loop() -> None:
         asyncio.set_event_loop(asyncio.new_event_loop())
 
 
-def _yf_download_with_retry(ticker: str, retries: int = 2, **kwargs) -> pd.DataFrame:
-    """Call yf.download with timeout, session reuse, and retry on failure.
+_YF_RETRIES = 2  # 1 initial + 2 retries on transient empty / non-429 failure
 
-    On 429 (rate limit), clears the cached Yahoo cookie (which carries the
-    rate-limit tag) and retries once with a fresh session. If still limited,
-    falls through to AKShare immediately.
 
-    Args:
-        ticker: Yahoo Finance ticker symbol.
-        retries: Max retry attempts on transient failure.
-        **kwargs: Passed to yf.download().
+def _yahoo_in_cooldown() -> bool:
+    """True if Yahoo is currently being skipped after a recent 429."""
+    if time.time() < _yahoo_cooldown_until:
+        remaining = int(_yahoo_cooldown_until - time.time())
+        logger.debug("Yahoo in cooldown (%ds left) — skipping", remaining)
+        return True
+    return False
 
-    Returns:
-        DataFrame from yfinance, or empty DataFrame on failure.
+
+def _yf_download(ticker: str, **kwargs) -> pd.DataFrame:
+    """Call yf.download with timeout, session reuse, retry, and 429 cooldown.
+
+    Returns empty DataFrame and engages a global 5-min cooldown on rate-limit
+    so concurrent callers (live fragment 5s, screener 25s) don't keep hammering
+    Yahoo with the same poisoned cookie.
     """
+    if _yahoo_in_cooldown():
+        return pd.DataFrame()
+
     _ensure_event_loop()
     import yfinance as yf
 
@@ -110,7 +104,7 @@ def _yf_download_with_retry(ticker: str, retries: int = 2, **kwargs) -> pd.DataF
     kwargs["timeout"] = int(YAHOO_TIMEOUT)
 
     last_err = None
-    for attempt in range(1, retries + 2):  # 1 initial + N retries
+    for attempt in range(1, _YF_RETRIES + 2):
         try:
             t0 = time.monotonic()
             df = yf.download(ticker, **kwargs)
@@ -119,35 +113,25 @@ def _yf_download_with_retry(ticker: str, retries: int = 2, **kwargs) -> pd.DataF
                 if attempt > 1:
                     logger.info("Yahoo %s succeeded on attempt %d (%.1fs)", ticker, attempt, elapsed)
                 return df
-            # Empty result — might be transient, retry
             logger.debug("Yahoo %s returned empty on attempt %d (%.1fs)", ticker, attempt, elapsed)
         except Exception as e:
             last_err = e
             err_str = str(e)
             logger.warning("Yahoo %s attempt %d failed: %s", ticker, attempt, e)
-
-            # 429 rate limit — clear poisoned cookie and retry once
             if "RateLimit" in err_str or "Too Many Requests" in err_str or "429" in err_str:
-                _clear_yf_cookies()
-                # Retry with fresh session
-                session = _get_yf_session()
-                kwargs["session"] = session
-                try:
-                    logger.info("Yahoo %s retrying with fresh cookies...", ticker)
-                    df = yf.download(ticker, **kwargs)
-                    if df is not None and not df.empty:
-                        logger.info("Yahoo %s succeeded after cookie reset", ticker)
-                        return df
-                except Exception as e2:
-                    logger.warning("Yahoo %s still failed after cookie reset: %s", ticker, e2)
+                global _yahoo_cooldown_until
+                _yahoo_cooldown_until = time.time() + _YAHOO_COOLDOWN_AFTER_429
+                logger.warning(
+                    "Yahoo cooldown engaged for %.0fs after rate limit",
+                    _YAHOO_COOLDOWN_AFTER_429,
+                )
                 return pd.DataFrame()
 
-        if attempt <= retries:
-            backoff = 2.0 * attempt  # 2s, 4s
-            time.sleep(backoff)
+        if attempt <= _YF_RETRIES:
+            time.sleep(2.0 * attempt)  # 2s, 4s
 
     if last_err:
-        logger.warning("Yahoo %s all %d attempts failed, last error: %s", ticker, retries + 1, last_err)
+        logger.warning("Yahoo %s all attempts failed, last error: %s", ticker, last_err)
     return pd.DataFrame()
 
 
@@ -164,7 +148,7 @@ def _yahoo_fx_history(start: str, end: str) -> pd.DataFrame:
     """
     # yfinance end date is exclusive, add 1 day
     end_dt = datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1)
-    df = _yf_download_with_retry(
+    df = _yf_download(
         "HKDCNY=X", start=start, end=end_dt.strftime("%Y-%m-%d"),
         interval="1d",
     )
@@ -180,7 +164,7 @@ def _yahoo_fx_history(start: str, end: str) -> pd.DataFrame:
 
 def _yahoo_fx_latest() -> float | None:
     """Fetch latest HKD→CNH from Yahoo Finance via yfinance."""
-    df = _yf_download_with_retry("HKDCNH=X", period="5d", interval="1d")
+    df = _yf_download("HKDCNH=X", period="5d", interval="1d")
     if df.empty:
         return None
     for c in reversed(df["Close"].tolist()):
@@ -193,23 +177,37 @@ def _yahoo_fx_latest() -> float | None:
 
 
 def _akshare_fx_spot() -> float | None:
-    """Fetch live HKD/CNH spot from AKShare."""
+    """Fetch live HKD→CNH spot from AKShare (Bank of China feed).
+
+    BOC reports HKD/CNY (onshore) — used as a CNH proxy since the
+    onshore/offshore spread is typically < 0.1%. Schema:
+        货币对 | 买报价 | 卖报价   (currency pair | bid | ask)
+
+    Source blocks non-CN IPs, so we route through ``A_SHARE_PROXY_URL`` if
+    configured (same proxy used by the other AKShare A-share endpoints).
+    """
     try:
         import akshare as ak
 
-        df = ak.fx_spot_quote()
+        from src.data.akshare_client import _a_share_proxy_env
+
+        with _a_share_proxy_env():
+            df = ak.fx_spot_quote()
         if df is None or df.empty:
             return None
         for _, row in df.iterrows():
-            row_str = " ".join(str(v) for v in row.values)
-            if "HKD" in row_str.upper() and "CNH" in row_str.upper():
-                for val in row.values:
-                    try:
-                        rate = float(val)
-                        if 0.5 < rate < 1.5:
-                            return rate
-                    except (ValueError, TypeError):
-                        continue
+            pair = str(row.get("货币对", "")).upper()
+            if "HKD" not in pair or ("CNY" not in pair and "CNH" not in pair):
+                continue
+            bid = row.get("买报价")
+            ask = row.get("卖报价")
+            try:
+                bid_f, ask_f = float(bid), float(ask)
+            except (ValueError, TypeError):
+                continue
+            mid = (bid_f + ask_f) / 2.0
+            if 0.5 < mid < 1.5:
+                return round(mid, 6)
     except Exception as e:
         logger.warning("AKShare FX spot failed: %s", e)
     return None
@@ -218,47 +216,71 @@ def _akshare_fx_spot() -> float | None:
 # ─── Public API ───
 
 
+def _check_cache_today_or_yesterday(today: date) -> float | None:
+    for d in [today, today - timedelta(days=1)]:
+        cached = get_fx_cached(d.isoformat())
+        if cached is not None:
+            logger.debug("FX from cache (%s): %.5f", d, cached)
+            return cached
+    return None
+
+
 def get_fx_latest() -> float:
     """Get the latest CNH-per-HKD rate.
 
     Priority: SQLite cache (instant) → network fetch (slow, only if stale).
     The rate moves <0.1% per day, so a cached value from today or yesterday is fine.
 
+    Concurrent callers are coalesced via ``_fx_fetch_lock``: only the first
+    thread does the network round-trip; subsequent threads re-check the cache
+    after acquiring the lock and almost always hit it. Without this, the
+    screener (TTL 25s), live fragment (every 5s) and chart panel can each
+    fire their own 30s Yahoo retry chain in parallel.
+
     Returns:
         CNH per 1 HKD (e.g., 0.92)
     """
-    # 1. Check SQLite cache — today or yesterday (instant, no network)
     today = date.today()
-    for d in [today, today - timedelta(days=1)]:
-        cached = get_fx_cached(d.isoformat())
+    cached = _check_cache_today_or_yesterday(today)
+    if cached is not None:
+        return cached
+
+    with _fx_fetch_lock:
+        # Re-check inside the lock — another thread may have populated it.
+        cached = _check_cache_today_or_yesterday(today)
         if cached is not None:
-            logger.debug("FX from cache (%s): %.5f", d, cached)
             return cached
 
-    # 2. Cache miss — fetch from network (Yahoo first — direct HK, no proxy needed)
-    for name, fn in [("Yahoo", _yahoo_fx_latest), ("AKShare", _akshare_fx_spot)]:
-        try:
-            t0 = time.monotonic()
-            rate = fn()
-            elapsed = time.monotonic() - t0
-            if rate and 0.5 < rate < 1.5:
-                logger.info("FX latest from %s: %.5f (%.1fs)", name, rate, elapsed)
-                # Persist to cache for next time
-                save_fx_rates(pd.DataFrame([{"date": today, "rate": rate}]))
-                return rate
-            logger.warning("FX from %s returned invalid rate: %s (%.1fs)", name, rate, elapsed)
-        except Exception as e:
-            logger.warning("FX latest from %s failed: %s", name, e)
+        # Cache miss — fetch from network. _yahoo_fx_latest self-skips when
+        # in cooldown so we don't retry every few seconds after a 429.
+        for name, fn in [("Yahoo", _yahoo_fx_latest), ("AKShare", _akshare_fx_spot)]:
+            try:
+                t0 = time.monotonic()
+                rate = fn()
+                elapsed = time.monotonic() - t0
+                if rate and 0.5 < rate < 1.5:
+                    logger.info("FX latest from %s: %.5f (%.1fs)", name, rate, elapsed)
+                    save_fx_rates(pd.DataFrame([{"date": today, "rate": rate}]))
+                    return rate
+                logger.debug("FX from %s returned invalid rate: %s (%.1fs)", name, rate, elapsed)
+            except Exception as e:
+                logger.warning("FX latest from %s failed: %s", name, e)
 
-    # 3. Any cached value at all
-    recent = get_fx_range_cached("2020-01-01", today.isoformat())
-    if not recent.empty and "rate" in recent.columns:
-        rate = recent.iloc[-1]["rate"]
-        logger.info("FX from historical cache: %.5f", rate)
-        return float(rate)
+        # Any cached value at all — fall through to the most recent historical rate.
+        # Persist it to today's slot so subsequent calls hit the fast path and
+        # don't re-enter this network branch on every fragment refresh.
+        recent = get_fx_range_cached("2020-01-01", today.isoformat())
+        if not recent.empty and "rate" in recent.columns:
+            rate = float(recent.iloc[-1]["rate"])
+            logger.info("FX from historical cache: %.5f (caching as today)", rate)
+            save_fx_rates(pd.DataFrame([{"date": today, "rate": rate}]))
+            return rate
 
-    logger.warning("All FX sources failed, using default %s", DEFAULT_FX_RATE)
-    return DEFAULT_FX_RATE
+        logger.warning("All FX sources failed, using default %s", DEFAULT_FX_RATE)
+        # Cache default too — prevents the next call from repeating this whole
+        # 30-second-plus probe chain. A real rate will overwrite once Yahoo recovers.
+        save_fx_rates(pd.DataFrame([{"date": today, "rate": DEFAULT_FX_RATE}]))
+        return DEFAULT_FX_RATE
 
 
 def get_fx_range(start: str, end: str) -> pd.DataFrame:

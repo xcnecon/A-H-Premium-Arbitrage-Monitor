@@ -268,32 +268,6 @@ def sync_all(
     return summary
 
 
-def sync_today_snapshots() -> int:
-    """Persist today's closing snapshots to the K-line cache for all pairs.
-
-    Designed to be called in a background thread after the dashboard loads,
-    so startup is not blocked.  Also safe to call after market close to lock
-    in the day's closing bar for fast next-day startup.
-
-    Returns:
-        Number of pairs successfully updated.
-    """
-    today = date.today()
-    if today.weekday() >= 5:
-        logger.info("Weekend — skipping snapshot persistence")
-        return 0
-    pairs = get_all_pairs()
-    errors: list[str] = []
-    count = _sync_today_from_snapshots(pairs, today.strftime("%Y-%m-%d"), errors)
-    if errors:
-        logger.warning("Snapshot sync had %d errors: %s", len(errors), errors[:5])
-    # Recompute premium for today
-    if count > 0:
-        today_str = today.strftime("%Y-%m-%d")
-        _recompute_premium(pairs, today_str, today_str)
-    return count
-
-
 def sync_background() -> dict[str, Any]:
     """Run gap-fill + today sync without deferring.  For background threads.
 

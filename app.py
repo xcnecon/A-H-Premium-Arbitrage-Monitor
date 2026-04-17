@@ -411,6 +411,34 @@ if "sync_done" not in st.session_state:
 if st.session_state.get("sync_error"):
     st.warning(f"Data sync failed: {st.session_state['sync_error']}. Showing cached data.")
 
+# ─── Pair discovery: background scan for newly-listed A/H pairs (once per day) ───
+if "pair_discovery_done" not in st.session_state:
+    try:
+        from src.data.pair_discovery import classify as _pd_classify
+        from src.data.pair_discovery import discover_background
+
+        _pd_summary = _pd_classify()
+        if _pd_summary.get("deferred"):
+            import threading as _pd_threading
+
+            _pd_threading.Thread(
+                target=discover_background,
+                daemon=True,
+                name="bg-pair-discovery",
+            ).start()
+            logger.info("Started background pair discovery")
+        st.session_state.pair_discovery_done = True
+    except Exception as e:
+        logger.error("Pair discovery kickoff failed: %s", e)
+        st.session_state.pair_discovery_done = True
+        st.session_state["pair_discovery_error"] = str(e)
+
+if st.session_state.get("pair_discovery_error"):
+    st.warning(
+        f"Pair discovery failed: {st.session_state['pair_discovery_error']}. "
+        "New A/H listings may not be detected today."
+    )
+
 TIMEFRAMES = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
 
 

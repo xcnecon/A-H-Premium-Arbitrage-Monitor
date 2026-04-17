@@ -236,7 +236,29 @@ def get_all_sync_meta() -> dict[tuple[str, str], str]:
 
     Returns:
         Dict mapping (code, market) -> last_date string.
+
+    Excludes sentinel rows whose code starts with '__' (e.g. discovery metadata),
+    so consumers iterating per-pair sync state never see synthetic entries.
     """
     conn = _get_connection()
-    cursor = conn.execute("SELECT code, market, last_date FROM sync_meta")
+    cursor = conn.execute(
+        "SELECT code, market, last_date FROM sync_meta WHERE code NOT LIKE '\\_\\_%' ESCAPE '\\'"
+    )
     return {(row["code"], row["market"]): row["last_date"] for row in cursor.fetchall()}
+
+
+# ---------------------------------------------------------------------------
+# Pair-discovery metadata (reuses sync_meta with sentinel key)
+# ---------------------------------------------------------------------------
+
+_DISCOVERY_META_KEY = ("__pair_discovery__", "META")
+
+
+def get_last_discovery_date() -> str | None:
+    """Return 'YYYY-MM-DD' of the last pair discovery run, or None."""
+    return get_last_sync_date(*_DISCOVERY_META_KEY)
+
+
+def update_discovery_meta(last_date: str) -> None:
+    """Mark pair discovery as complete for *last_date*."""
+    update_sync_meta(*_DISCOVERY_META_KEY, last_date)

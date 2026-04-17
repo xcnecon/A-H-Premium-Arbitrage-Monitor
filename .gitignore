@@ -80,6 +80,7 @@ nosetests.xml
 # Data files
 # ===========================
 *.csv
+!/ah_pairs.csv
 *.xlsx
 *.pickle
 *.pkl

@@ -17,25 +17,6 @@ _BATCH_TIMEOUT: float = 15.0  # longer timeout for batch through proxy
 _RETRY_TIMEOUT: float = 20.0  # even longer for retry attempts
 _PROXIES: dict | None = A_SHARE_PROXY
 
-# ---------------------------------------------------------------------------
-# Shared requests.Session — reuses TCP connections to the proxy, avoiding
-# repeated handshake overhead on every request.
-# ---------------------------------------------------------------------------
-_session: requests.Session | None = None
-
-
-def _get_session() -> requests.Session:
-    """Lazily create a requests.Session with proxy + connection pooling."""
-    global _session
-    if _session is not None:
-        return _session
-    s = requests.Session()
-    if _PROXIES:
-        s.proxies.update(_PROXIES)
-    s.headers.update({"Referer": "http://finance.sina.com.cn"})
-    _session = s
-    return _session
-
 
 # ---------------------------------------------------------------------------
 # H-share: Futu get_market_snapshot
@@ -112,7 +93,9 @@ def _fetch_sina(a_code: str) -> dict | None:
     headers = {"Referer": "http://finance.sina.com.cn"}
 
     try:
-        resp = _get_session().get(url, headers=headers, timeout=_REQUEST_TIMEOUT)
+        resp = requests.get(
+            url, headers=headers, timeout=_REQUEST_TIMEOUT, proxies=_PROXIES,
+        )
         resp.encoding = "gb2312"
         text = resp.text.strip()
 
@@ -167,7 +150,7 @@ def _fetch_tencent(a_code: str) -> dict | None:
     url = f"https://qt.gtimg.cn/q={symbol}"
 
     try:
-        resp = _get_session().get(url, timeout=_REQUEST_TIMEOUT)
+        resp = requests.get(url, timeout=_REQUEST_TIMEOUT, proxies=_PROXIES)
         resp.encoding = "gb2312"
         text = resp.text.strip()
 
@@ -269,7 +252,7 @@ def _fetch_tencent_batch(codes: list[str]) -> dict[str, dict]:
         chunk_syms = symbols[i : i + _CHUNK]
         url = f"https://qt.gtimg.cn/q={','.join(chunk_syms)}"
         try:
-            resp = _get_session().get(url, timeout=_BATCH_TIMEOUT)
+            resp = requests.get(url, timeout=_BATCH_TIMEOUT, proxies=_PROXIES)
             resp.encoding = "gb2312"
 
             for line in resp.text.strip().split("\n"):
@@ -313,11 +296,10 @@ def _sina_batch_chunk(
     """Fetch one chunk of A-share codes from Sina. Returns code->snapshot dict."""
     result: dict[str, dict] = {}
     symbols = [_a_code_to_sina_symbol(c) for c in chunk]
-    # rn= timestamp prevents edge/proxy caching
-    url = f"http://hq.sinajs.cn/rn={int(time.time() * 1000)}&list={','.join(symbols)}"
+    url = f"http://hq.sinajs.cn/list={','.join(symbols)}"
     headers = {"Referer": "http://finance.sina.com.cn"}
 
-    resp = _get_session().get(url, headers=headers, timeout=timeout)
+    resp = requests.get(url, headers=headers, timeout=timeout, proxies=_PROXIES)
     resp.encoding = "gb2312"
 
     # Build reverse lookup for O(1) matching

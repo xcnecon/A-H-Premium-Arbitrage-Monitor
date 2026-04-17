@@ -1,6 +1,6 @@
 # A/H Premium Arbitrage Monitor
 
-Real-time monitor for A-share / H-share premium arbitrage opportunities across 169 dual-listed Chinese stocks. Tracks price differentials between Shanghai/Shenzhen (A-shares) and Hong Kong (H-shares) exchanges, with interactive charts, a premium screener, and Telegram alerts.
+Real-time monitor for A-share / H-share premium arbitrage opportunities across all dual-listed Chinese stocks. Tracks price differentials between Shanghai/Shenzhen (A-shares) and Hong Kong (H-shares) exchanges, with interactive charts, a premium screener, and Telegram alerts. The pair list grows automatically — a daily background job scans HKEX for newly-listed A+H pairs.
 
 ![Chart view](docs/screenshot-chart.png)
 ![Screener view](docs/screenshot-screener.png)
@@ -9,7 +9,7 @@ Real-time monitor for A-share / H-share premium arbitrage opportunities across 1
 
 - **Real-time premium monitoring** -- live H/A ratio and premium % updates every 5 seconds during market hours
 - **Historical charts** -- interactive line charts (Plotly) for A-share price, H-share price, and H/A premium ratio
-- **Premium screener** -- scan all 169 A/H pairs at once to find the widest dislocations
+- **Premium screener** -- scan every active A/H pair at once to find the widest dislocations
 - **Telegram alerts** -- configurable threshold-based notifications when premium crosses user-defined levels
 - **FX rate tracking** -- live CNH/HKD rate from Yahoo Finance with SQLite caching and fallback sources
 - **Configurable watchlist** -- add/remove pairs from the sidebar; persisted in local SQLite
@@ -102,27 +102,29 @@ The FX rate convention is CNH per 1 HKD (approximately 0.92).
 
 ```
 ah-arb/
+├── ah_pairs.csv                # Canonical A/H pair registry (status, is_red_chip, source, ...)
 ├── app.py                      # Streamlit dashboard (historical + live fragment)
 ├── requirements.txt
 ├── .env.example                # Environment variable template
 ├── src/
 │   ├── config/settings.py      # OPEND_HOST/PORT, DB_PATH, DEFAULT_FX_RATE, etc.
 │   ├── data/
-│   │   ├── ah_pairs.json       # Static A/H pair mapping (169 pairs)
-│   │   ├── ah_mapping.py       # HK <-> A code lookup
+│   │   ├── ah_mapping.py       # CSV-backed HK <-> A code lookup + add/delisted helpers
+│   │   ├── pair_discovery.py   # Daily HKEX widget scan + Telegram alerts
 │   │   ├── futu_client.py      # H-share K-line (Futu, AKShare fallback)
 │   │   ├── akshare_client.py   # A-share K-line (Tencent source)
 │   │   ├── fx_client.py        # FX rates (Yahoo Finance, AKShare, SQLite cache)
 │   │   ├── realtime.py         # Live snapshots (Futu snapshot, Sina/Tencent HTTP)
 │   │   └── sync.py             # K-line sync orchestration
+│   ├── alerts/
+│   │   ├── checker.py          # Alert condition evaluation + rate limiting
+│   │   └── telegram.py         # Telegram bot notification delivery
 │   ├── calc/
 │   │   ├── premium.py          # Ratio OHLCV computation, premium %
-│   │   └── screener.py         # Real-time A/H premium screener (all 169 pairs)
+│   │   └── screener.py         # Real-time A/H premium screener (all active pairs)
 │   └── storage/
-│       ├── db.py               # SQLite: watchlist CRUD, FX cache, sync metadata
+│       ├── db.py               # SQLite: watchlist CRUD, FX cache, sync/scan metadata
 │       └── kline_cache.py      # K-line cache read/write for daily bars
-├── scripts/
-│   └── bootstrap_ah_pairs.py   # Regenerate ah_pairs.json from web sources
 └── tests/
     ├── test_mapping.py
     ├── test_premium.py
@@ -146,13 +148,13 @@ The project runs on both Windows and macOS. All file paths use `pathlib.Path` fo
 
 # A/H 溢价套利监控
 
-实时监控 169 只 A+H 双重上市股票的 A/H 溢价套利机会。追踪沪深 A 股与香港 H 股之间的价差，提供交互式图表、全市场筛选器和 Telegram 预警。
+实时监控全部 A+H 双重上市股票的 A/H 溢价套利机会。追踪沪深 A 股与香港 H 股之间的价差，提供交互式图表、全市场筛选器和 Telegram 预警。
 
 ## 功能
 
 - **实时溢价监控** -- 盘中每 5 秒刷新 H/A 比值和溢价率
 - **历史走势图** -- 交互式折线图（Plotly），展示 A 股价格、H 股价格及 H/A 溢价比值
-- **溢价筛选器** -- 一键扫描全部 169 对 A/H 股，找出偏离最大的标的
+- **溢价筛选器** -- 一键扫描全部 A/H 股，找出偏离最大的标的
 - **Telegram 预警** -- 溢价突破自定义阈值时推送通知
 - **汇率追踪** -- Yahoo Finance 实时离岸人民币/港币汇率，SQLite 缓存 + 多源备用
 - **自选股管理** -- 侧边栏添加/删除，本地 SQLite 持久化

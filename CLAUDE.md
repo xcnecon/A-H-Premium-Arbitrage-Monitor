@@ -23,7 +23,7 @@ Real-time monitor for A-share / H-share premium arbitrage opportunities across d
   - Cached daily in SQLite `fx_rates` table
   - Convention: rate ≈ 0.92 = **CNH per 1 HKD** (1 HKD = 0.92 CNH)
   - To convert HKD→CNH: `H_CNH = H_HKD × rate`
-- **A/H mapping**: Static JSON (`src/data/ah_pairs.json`, 169 pairs) + `stock_zh_ah_name()` bootstrap
+- **A/H mapping**: Single root CSV (`ah_pairs.csv`) — auto-grown by daily HKEX widget discovery; manual edits for red-chip A+H pairs
 - **Dashboard**: Streamlit + Plotly (candlestick + stacked volume subplots)
 - **Real-time updates**: `@st.fragment(run_every=5s)` — only during market hours (9:15–16:15 UTC+8, weekdays)
 - **Task scheduling**: APScheduler (background sync jobs)
@@ -66,15 +66,16 @@ pytest
 ah-arb/
 ├── CLAUDE.md
 ├── requirements.txt
+├── ah_pairs.csv                # Canonical A/H pair registry (status, is_red_chip, source, ...)
 ├── app.py                      # Streamlit dashboard (historical load + live fragment)
 ├── src/
 │   ├── config/settings.py      # OPEND_HOST/PORT, DB_PATH, lookback days, DEFAULT_FX_RATE
 │   ├── data/
-│   │   ├── ah_pairs.json       # Static A/H pair mapping (169 pairs)
-│   │   ├── ah_mapping.py       # HK↔A code lookup
+│   │   ├── ah_mapping.py       # CSV-backed HK↔A lookup + add/delisted helpers
+│   │   ├── pair_discovery.py   # Daily HKEX widget scan + Telegram alerts (unknown / dead-A)
 │   │   ├── futu_client.py      # H-share K-line (Futu, AKShare fallback)
 │   │   ├── akshare_client.py   # A-share K-line (Tencent source)
-│   │   ├── fx_client.py        # FX rates (Yahoo Finance, AKShare, SQLite cache)
+│   │   ├── fx_client.py        # FX rates (Yahoo Finance, AKShare, SQLite cache, 5-min 429 cooldown)
 │   │   ├── realtime.py         # Live snapshots (Futu snapshot, Sina/Tencent HTTP)
 │   │   └── sync.py             # K-line sync orchestration (historical + daily snapshots)
 │   ├── alerts/
@@ -82,12 +83,10 @@ ah-arb/
 │   │   └── telegram.py         # Telegram bot notification delivery
 │   ├── calc/
 │   │   ├── premium.py          # Ratio OHLCV computation, premium %
-│   │   └── screener.py         # Real-time A/H premium screener (all 169 pairs)
+│   │   └── screener.py         # Real-time A/H premium screener (all active pairs)
 │   └── storage/
-│       ├── db.py               # SQLite: watchlist CRUD + FX rate cache + sync metadata
+│       ├── db.py               # SQLite: watchlist CRUD + FX rate cache + sync/scan metadata
 │       └── kline_cache.py      # K-line cache storage — bulk read/write for A/H daily bars
-├── scripts/
-│   └── bootstrap_ah_pairs.py   # Regenerate ah_pairs.json from web sources
 ├── tests/
 │   ├── test_mapping.py
 │   ├── test_premium.py

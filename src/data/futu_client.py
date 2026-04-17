@@ -70,61 +70,6 @@ def get_h_kline(code: str, start: str, end: str, ktype: str = "K_DAY") -> pd.Dat
         return _fallback_akshare_hk(code, start, end)
 
 
-def get_h_kline_with_ctx(
-    ctx: "OpenQuoteContext",
-    code: str,
-    start: str,
-    end: str,
-) -> pd.DataFrame:
-    """Fetch H-share K-line reusing an existing Futu connection.
-
-    Same as get_h_kline but caller manages the OpenQuoteContext lifecycle.
-    Used by sync.py to avoid opening/closing 169 connections.
-
-    Args:
-        ctx: An already-connected OpenQuoteContext.
-        code: HK stock code, e.g. "00939".
-        start: Start date "YYYY-MM-DD".
-        end: End date "YYYY-MM-DD".
-
-    Returns:
-        DataFrame with columns: date, open, high, low, close, volume, turnover.
-        Empty DataFrame on failure.
-    """
-    futu_code = f"HK.{code}" if not code.startswith("HK.") else code
-    try:
-        ret, data, _ = ctx.request_history_kline(
-            futu_code,
-            start=start,
-            end=end,
-            ktype=KLType.K_DAY,
-            autype=AuType.NONE,
-            max_count=500,
-        )
-        if ret != RET_OK:
-            logger.warning("Futu kline (ctx) failed for %s: %s", code, str(data)[:100])
-            return pd.DataFrame()
-
-        if data.empty:
-            return pd.DataFrame()
-
-        df = pd.DataFrame(
-            {
-                "date": pd.to_datetime(data["time_key"]).dt.strftime("%Y-%m-%d"),
-                "open": data["open"],
-                "high": data["high"],
-                "low": data["low"],
-                "close": data["close"],
-                "volume": data["volume"].astype(int),
-                "turnover": data["turnover"],
-            }
-        )
-        return df
-    except Exception as e:
-        logger.warning("Futu kline (ctx) error for %s: %s", code, e)
-        return pd.DataFrame()
-
-
 def _fallback_akshare_hk(code: str, start: str, end: str) -> pd.DataFrame:
     """Fallback to AKShare for HK stock data when OpenD unavailable."""
     try:

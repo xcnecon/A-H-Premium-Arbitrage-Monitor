@@ -10,3 +10,4 @@ requests>=2.31.0
 yfinance>=1.2.0
 python-dotenv>=1.0.0
 orjson>=3.9.0
+openpyxl>=3.1.0

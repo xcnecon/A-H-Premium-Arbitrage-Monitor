@@ -76,6 +76,13 @@ def init_db() -> None:
             PRIMARY KEY (code, market)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pair_discovery_scanned (
+            hk_code      TEXT PRIMARY KEY,
+            scanned_date TEXT NOT NULL,
+            is_ah        INTEGER NOT NULL DEFAULT 0
+        )
+    """)
     # ── Migrate old alert schema (direction-based) to crossover schema ──
     cursor = conn.execute("PRAGMA table_info(alert_rules)")
     old_cols = {row[1] for row in cursor.fetchall()}
@@ -390,3 +397,31 @@ def get_all_alert_rules_with_state() -> list[dict]:
            ORDER BY r.hk_code, r.threshold"""
     )
     return [dict(row) for row in cursor.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Pair discovery scan tracking — incremental "have we already queried this code?"
+# (The pair registry itself lives in ah_pairs.csv via src.data.ah_mapping.)
+# ---------------------------------------------------------------------------
+
+
+def get_scanned_hk_codes() -> set[str]:
+    """Return set of HK codes already scanned by the discovery widget."""
+    conn = _get_connection()
+    cursor = conn.execute("SELECT hk_code FROM pair_discovery_scanned")
+    return {row["hk_code"] for row in cursor.fetchall()}
+
+
+def mark_scanned_bulk(rows: list[tuple[str, str, bool]]) -> None:
+    """Bulk upsert of scan results. rows = [(hk_code, date, is_ah), ...]."""
+    if not rows:
+        return
+    payload = [(r[0], r[1], 1 if r[2] else 0) for r in rows]
+    with _write_lock:
+        conn = _get_connection()
+        conn.executemany(
+            "INSERT OR REPLACE INTO pair_discovery_scanned "
+            "(hk_code, scanned_date, is_ah) VALUES (?, ?, ?)",
+            payload,
+        )
+        conn.commit()

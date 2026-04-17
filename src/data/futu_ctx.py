@@ -28,11 +28,3 @@ def get_quote_ctx() -> OpenQuoteContext:
         return _ctx
 
 
-def close_quote_ctx() -> None:
-    """Close the shared context (call at app shutdown)."""
-    global _ctx
-    with _lock:
-        if _ctx is not None:
-            logger.info("Closing singleton OpenQuoteContext")
-            _ctx.close()
-            _ctx = None

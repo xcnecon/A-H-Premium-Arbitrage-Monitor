@@ -1,56 +1,121 @@
-"""A/H dual-listed stock pair mapping lookup utilities."""
+"""A/H dual-listed stock pair registry — single source of truth.
 
-import json
+The pair registry lives at ``ah_pairs.csv`` in the project root. Schema:
+
+    hk_code, a_code, name, status, is_red_chip, source, first_seen
+
+The CSV is read into an in-memory cache at import time and kept fresh by
+``refresh_pairs_cache()`` after the daily discovery job mutates the file.
+
+Mutation API (``add_pair``, ``mark_pairs_delisted``) is used
+by the background discovery worker. All writes are serialised by a module
+lock and use ``os.replace()`` so concurrent readers never observe a torn
+file. Pair rows are sorted by ``hk_code`` on every write to keep git diffs
+diff-friendly.
+
+Test isolation: set ``AH_ARB_PAIRS_CSV`` env var to redirect to a tmp file.
+"""
+
+import csv
 import logging
-from pathlib import Path
+import os
+import pathlib
+import tempfile
+import threading
+from datetime import date
 
 logger = logging.getLogger(__name__)
 
-# Load the mapping once at module level
-_PAIRS_FILE = Path(__file__).parent / "ah_pairs.json"
+_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+_DEFAULT_PAIRS_FILE = _REPO_ROOT / "ah_pairs.csv"
 
-try:
-    with open(_PAIRS_FILE, encoding="utf-8") as f:
-        _AH_PAIRS: dict[str, dict[str, str]] = json.load(f)
-    logger.info("Loaded %d A/H pairs from %s", len(_AH_PAIRS), _PAIRS_FILE)
-except FileNotFoundError:
-    logger.error("A/H pairs file not found: %s", _PAIRS_FILE)
-    _AH_PAIRS = {}
-except json.JSONDecodeError as e:
-    logger.error("Failed to parse A/H pairs JSON: %s", e)
-    _AH_PAIRS = {}
+_FIELDNAMES = [
+    "hk_code",
+    "a_code",
+    "name",
+    "status",
+    "is_red_chip",
+    "source",
+    "first_seen",
+]
+_lock = threading.Lock()
 
-# Build reverse mapping (A code -> HK code) at module level
-_REVERSE_MAP: dict[str, str] = {}
-for _hk, _info in _AH_PAIRS.items():
-    _a = _info.get("a_code", "")
-    if _a and _a not in _REVERSE_MAP:
-        _REVERSE_MAP[_a] = _hk
+
+def _csv_path() -> pathlib.Path:
+    override = os.environ.get("AH_ARB_PAIRS_CSV")
+    return pathlib.Path(override) if override else _DEFAULT_PAIRS_FILE
+
+
+def _load_csv() -> list[dict[str, str]]:
+    path = _csv_path()
+    if not path.exists():
+        logger.warning("Pairs CSV missing: %s", path)
+        return []
+    with open(path, encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _write_csv(rows: list[dict[str, str]]) -> None:
+    """Atomic write — sorts by hk_code for stable git diffs."""
+    path = _csv_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = sorted(rows, key=lambda r: r["hk_code"])
+    fd, tmp = tempfile.mkstemp(suffix=".tmp", prefix="ah_pairs_", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=_FIELDNAMES)
+            w.writeheader()
+            for r in rows:
+                w.writerow({k: r.get(k, "") for k in _FIELDNAMES})
+        os.replace(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def _build_indexes(
+    rows: list[dict[str, str]],
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """Build hk→info and a→hk maps from active rows only."""
+    pairs: dict[str, dict[str, str]] = {}
+    reverse: dict[str, str] = {}
+    for r in rows:
+        if r.get("status", "active") != "active":
+            continue
+        hk = r.get("hk_code", "")
+        a = r.get("a_code", "")
+        if not hk or not a:
+            continue
+        pairs[hk] = {"a_code": a, "name": r.get("name", "")}
+        if a not in reverse:
+            reverse[a] = hk
+    return pairs, reverse
+
+
+_AH_PAIRS, _REVERSE_MAP = _build_indexes(_load_csv())
+
+
+def refresh_pairs_cache() -> int:
+    """Rebuild in-memory maps from CSV. Returns active pair count."""
+    global _AH_PAIRS, _REVERSE_MAP
+    with _lock:
+        _AH_PAIRS, _REVERSE_MAP = _build_indexes(_load_csv())
+        logger.info("Refreshed A/H pair cache: %d active pairs", len(_AH_PAIRS))
+        return len(_AH_PAIRS)
 
 
 def _normalize_hk_code(hk_code: str) -> str:
-    """Normalize HK code to 5-digit zero-padded format."""
-    if not hk_code:
-        return ""
-    code = hk_code.replace("HK.", "").strip()
-    return code.zfill(5)
+    return hk_code.replace("HK.", "").strip().zfill(5) if hk_code else ""
+
+
+# ---------------------------------------------------------------------------
+# Read API
+# ---------------------------------------------------------------------------
 
 
 def get_a_code(hk_code: str) -> str | None:
-    """Look up the A-share code for a given HK code.
-
-    Args:
-        hk_code: HK stock code, e.g. "00939" or "939".
-
-    Returns:
-        A-share code string, or None if not found.
-    """
-    normalized = _normalize_hk_code(hk_code)
-    pair = _AH_PAIRS.get(normalized)
-    if pair:
-        return pair["a_code"]
-    # Also try the raw input in case it already matches
-    pair = _AH_PAIRS.get(hk_code)
+    pair = _AH_PAIRS.get(_normalize_hk_code(hk_code))
     if pair:
         return pair["a_code"]
     logger.debug("No A-share mapping found for HK code: %s", hk_code)
@@ -58,14 +123,6 @@ def get_a_code(hk_code: str) -> str | None:
 
 
 def get_hk_code(a_code: str) -> str | None:
-    """Reverse-look up the HK code for a given A-share code.
-
-    Args:
-        a_code: A-share code, e.g. "601939".
-
-    Returns:
-        HK code string (5-digit, zero-padded), or None if not found.
-    """
     hk = _REVERSE_MAP.get(a_code)
     if hk is None:
         logger.debug("No HK mapping found for A-share code: %s", a_code)
@@ -73,26 +130,83 @@ def get_hk_code(a_code: str) -> str | None:
 
 
 def get_all_pairs() -> dict[str, dict[str, str]]:
-    """Return the full A/H pair mapping dictionary.
-
-    Returns:
-        Dict mapping HK codes to {"a_code": ..., "name": ...}.
-    """
+    """Return active pairs as {hk_code: {a_code, name}}."""
     return dict(_AH_PAIRS)
 
 
 def get_pair_name(hk_code: str) -> str | None:
-    """Get the Chinese name for an A/H pair by HK code.
+    pair = _AH_PAIRS.get(_normalize_hk_code(hk_code))
+    return pair.get("name") if pair else None
 
-    Args:
-        hk_code: HK stock code, e.g. "00939" or "939".
 
-    Returns:
-        Chinese company name, or None if not found.
+def get_all_pairs_meta() -> list[dict[str, str]]:
+    """Return raw CSV rows including status/is_red_chip — for admin views and discovery."""
+    return _load_csv()
+
+
+# ---------------------------------------------------------------------------
+# Mutation API — used by the daily pair_discovery background worker
+# ---------------------------------------------------------------------------
+
+
+def add_pair(
+    hk_code: str,
+    a_code: str,
+    name: str,
+    source: str = "hkex",
+    is_red_chip: bool = False,
+) -> str:
+    """Insert a new pair if absent. Returns ``"new"`` or ``"unchanged"``.
+
+    Does NOT reactivate delisted rows — once a pair flips to ``status='delisted'``
+    it stays that way until the user edits ah_pairs.csv. Otherwise discovery
+    would daily flip back HKEX-listed shells whose A-side has no trading data
+    (e.g. 00042 → 000585 东电退), poisoning K-line sync with empty responses.
     """
-    normalized = _normalize_hk_code(hk_code)
-    pair = _AH_PAIRS.get(normalized) or _AH_PAIRS.get(hk_code)
-    if pair:
-        return pair.get("name")
-    logger.debug("No name found for HK code: %s", hk_code)
-    return None
+    hk_code = _normalize_hk_code(hk_code)
+    inserted = False
+    with _lock:
+        rows = _load_csv()
+        existing = next((r for r in rows if r.get("hk_code") == hk_code), None)
+        if existing is None:
+            rows.append({
+                "hk_code": hk_code,
+                "a_code": a_code,
+                "name": name or "",
+                "status": "active",
+                "is_red_chip": "true" if is_red_chip else "false",
+                "source": source,
+                "first_seen": date.today().strftime("%Y-%m-%d"),
+            })
+            _write_csv(rows)
+            inserted = True
+        elif existing.get("status") != "active":
+            logger.info(
+                "Pair %s exists as status=%s — not reactivating (edit ah_pairs.csv to re-enable)",
+                hk_code,
+                existing.get("status"),
+            )
+    # refresh outside the lock — refresh_pairs_cache() itself acquires _lock
+    if inserted:
+        refresh_pairs_cache()
+        return "new"
+    return "unchanged"
+
+
+def mark_pairs_delisted(hk_codes: list[str]) -> int:
+    """Mark active pairs as delisted. Returns count actually changed."""
+    if not hk_codes:
+        return 0
+    target = {_normalize_hk_code(c) for c in hk_codes}
+    changed = 0
+    with _lock:
+        rows = _load_csv()
+        for r in rows:
+            if r.get("hk_code") in target and r.get("status") == "active":
+                r["status"] = "delisted"
+                changed += 1
+        if changed:
+            _write_csv(rows)
+    if changed:
+        refresh_pairs_cache()
+    return changed
