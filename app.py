@@ -35,7 +35,7 @@ from src.storage.db import (
     remove_pair,
     upsert_alert_rule,
 )
-from src.storage.kline_cache import get_premium_history
+from src.storage.kline_cache import get_premium_history, load_kline
 
 logging.basicConfig(
     level=logging.INFO,
@@ -898,14 +898,27 @@ def _chart_panel(timeframe: str) -> None:
     cache_key = f"{display_hk}_{timeframe}"
     if st.session_state.get("_cache_key") != cache_key:
         with st.spinner("Loading..."), ThreadPoolExecutor(max_workers=4) as pool:
-            fut_h = pool.submit(get_h_kline, display_hk, start_str, end_str)
-            fut_a = pool.submit(get_a_kline, a_code, start_str, end_str)
+            fut_h = pool.submit(load_kline, display_hk, "H", start_str, end_str)
+            fut_a = pool.submit(load_kline, a_code, "A", start_str, end_str)
             fut_fx_spot = pool.submit(get_fx_latest)
             fut_fx = pool.submit(get_fx_range, start_str, end_str)
-            df_h = fut_h.result(timeout=30)
-            df_a = fut_a.result(timeout=30)
+            df_h = fut_h.result(timeout=10)
+            df_a = fut_a.result(timeout=10)
             fx_spot = fut_fx_spot.result(timeout=30)
             df_fx = fut_fx.result(timeout=30)
+
+        # Cache miss → live fetch as fallback (background sync may not have run yet)
+        if df_h.empty or df_a.empty:
+            with st.spinner("Fetching live data..."), ThreadPoolExecutor(max_workers=2) as pool:
+                fut_live_h = pool.submit(get_h_kline, display_hk, start_str, end_str) if df_h.empty else None
+                fut_live_a = pool.submit(get_a_kline, a_code, start_str, end_str) if df_a.empty else None
+                try:
+                    if fut_live_h is not None:
+                        df_h = fut_live_h.result(timeout=30)
+                    if fut_live_a is not None:
+                        df_a = fut_live_a.result(timeout=30)
+                except TimeoutError:
+                    logger.warning("Live K-line fetch timed out for %s/%s", display_hk, a_code)
 
         data_ok = True
         if df_h.empty:
