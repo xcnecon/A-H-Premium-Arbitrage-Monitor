@@ -68,6 +68,11 @@ nosetests.xml
 .streamlit/secrets.toml
 
 # ===========================
+# Local launcher (contains machine-specific path)
+# ===========================
+run.sh
+
+# ===========================
 # SQLite
 # ===========================
 *.db
