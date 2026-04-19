@@ -766,6 +766,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
             line=dict(color=c["up"], width=1.5),
             name="H/A Ratio",
             hovertemplate="%{y:.4f}<extra></extra>",
+            connectgaps=True,
         ),
         row=1,
         col=1,
