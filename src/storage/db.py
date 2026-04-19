@@ -214,11 +214,10 @@ def save_fx_rates(df: pd.DataFrame) -> int:
     rows = [(str(row["date"]), float(row["rate"])) for _, row in df.iterrows()]
     with _write_lock:
         conn = _get_connection()
-        for d, r in rows:
-            conn.execute(
-                "INSERT OR REPLACE INTO fx_rates (date, rate) VALUES (?, ?)",
-                (d, r),
-            )
+        conn.executemany(
+            "INSERT OR REPLACE INTO fx_rates (date, rate) VALUES (?, ?)",
+            rows,
+        )
         conn.commit()
     return len(rows)
 

@@ -442,7 +442,7 @@ if st.session_state.get("pair_discovery_error"):
 TIMEFRAMES = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
 
 
-@st.cache_data(ttl=25, show_spinner="Fetching data for all A/H pairs...")
+@st.cache_data(ttl=45, show_spinner="Fetching data for all A/H pairs...")
 def _cached_screener() -> pd.DataFrame:
     """Cached screener with historical premium changes."""
     df = compute_screener_table()
@@ -529,9 +529,13 @@ def _watchlist_panel() -> None:
             logger.warning("Parallel snapshot fetch failed, falling back to sequential")
             h_snaps = get_h_snapshots_batch(hk_codes)
             a_snaps = get_a_snapshots_batch(a_codes)
-        st.session_state["_h_snaps"] = h_snaps
-        st.session_state["_a_snaps"] = a_snaps
-        st.session_state["_snap_ts"] = time.time()
+        # Avoid poisoning cache with empty results — keep prior fresh batch
+        if h_snaps and a_snaps:
+            st.session_state["_h_snaps"] = h_snaps
+            st.session_state["_a_snaps"] = a_snaps
+            st.session_state["_snap_ts"] = time.time()
+        else:
+            logger.warning("Snapshot fetch returned empty — keeping prior cache")
 
     # FX rate barely changes intraday — cache for 5 min in session_state
     fx_age = time.time() - st.session_state.get("_fx_ts", 0)

@@ -190,17 +190,16 @@ def get_premium_history(
 ) -> pd.DataFrame:
     """For each hk_code, return ratio_close at the Nth most recent trading day.
 
-    Runs individual LIMIT queries per code to leverage the (hk_code, date)
-    PRIMARY KEY index for fast reverse scans, instead of a full-table
-    ROW_NUMBER() window function.
+    Uses a single ROW_NUMBER() window query over all codes at once, then pivots
+    in Python. Replaces the previous N+1 loop of per-code LIMIT queries.
 
     Args:
         hk_codes: List of HK stock codes.
         offsets: List of row-number offsets (1 = most recent day, 5 = 5th most recent, etc.).
 
     Returns:
-        DataFrame with columns: hk_code, ratio_1d, ratio_5d, ratio_20d, ratio_60d
-        (column names derived from offsets).
+        DataFrame with one row per input code and columns: hk_code, ratio_{n}d
+        for each n in offsets. Missing offsets are filled with None.
     """
     if offsets is None:
         offsets = [1, 5, 20, 60]
@@ -210,24 +209,30 @@ def get_premium_history(
     offset_ints = sorted(set(offsets))
     max_offset = max(offset_ints)
 
+    placeholders = ",".join("?" * len(hk_codes))
     sql = (
-        "SELECT ratio_close FROM premium_daily "
-        "WHERE hk_code = ? ORDER BY date DESC LIMIT ?"
+        "SELECT hk_code, ratio_close, rn FROM ("
+        "  SELECT hk_code, ratio_close, "
+        "         ROW_NUMBER() OVER (PARTITION BY hk_code ORDER BY date DESC) AS rn"
+        f"  FROM premium_daily WHERE hk_code IN ({placeholders})"
+        ") WHERE rn <= ?"
     )
 
-    data: list[dict] = []
     conn = _get_connection()
-    for code in hk_codes:
-        cursor = conn.execute(sql, (code, max_offset))
-        ratios = [row["ratio_close"] for row in cursor.fetchall()]
-        row_dict: dict = {"hk_code": code}
-        for n in offset_ints:
-            idx = n - 1  # 1-based offset to 0-based index
-            row_dict[f"ratio_{n}d"] = ratios[idx] if idx < len(ratios) else None
-        data.append(row_dict)
+    cursor = conn.execute(sql, (*hk_codes, max_offset))
 
-    if not data:
-        return pd.DataFrame()
+    # code → {rn: ratio_close}
+    by_code: dict[str, dict[int, float]] = {}
+    for row in cursor.fetchall():
+        by_code.setdefault(row["hk_code"], {})[row["rn"]] = row["ratio_close"]
+
+    data = [
+        {
+            "hk_code": code,
+            **{f"ratio_{n}d": by_code.get(code, {}).get(n) for n in offset_ints},
+        }
+        for code in hk_codes
+    ]
     return pd.DataFrame(data)
 
 
