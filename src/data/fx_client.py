@@ -173,6 +173,23 @@ def _yahoo_fx_latest() -> float | None:
     return None
 
 
+def get_usd_hkd_latest() -> float:
+    """Get the latest USD→HKD rate (HKD per 1 USD, ~7.80 peg band 7.75–7.85).
+
+    Source: Yahoo Finance ``HKD=X``. Falls back to 7.80 (peg center) if Yahoo
+    is unreachable. Rate moves <0.02% per day — cache at the caller.
+    """
+    try:
+        df = _yf_download("HKD=X", period="5d", interval="1d")
+        if not df.empty:
+            for c in reversed(df["Close"].tolist()):
+                if pd.notna(c) and 7.70 < float(c) < 7.90:
+                    return round(float(c), 5)
+    except Exception as e:
+        logger.warning("USD/HKD fetch failed: %s", e)
+    return 7.80
+
+
 # ─── Source 2: AKShare fx_spot_quote (live fallback) ───
 
 

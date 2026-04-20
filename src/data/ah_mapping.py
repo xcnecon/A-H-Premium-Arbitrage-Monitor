@@ -35,6 +35,7 @@ _FIELDNAMES = [
     "name",
     "status",
     "is_red_chip",
+    "is_restricted",
     "source",
     "first_seen",
 ]
@@ -87,7 +88,11 @@ def _build_indexes(
         a = r.get("a_code", "")
         if not hk or not a:
             continue
-        pairs[hk] = {"a_code": a, "name": r.get("name", "")}
+        pairs[hk] = {
+            "a_code": a,
+            "name": r.get("name", ""),
+            "is_restricted": r.get("is_restricted", "false"),
+        }
         if a not in reverse:
             reverse[a] = hk
     return pairs, reverse
@@ -139,6 +144,12 @@ def get_pair_name(hk_code: str) -> str | None:
     return pair.get("name") if pair else None
 
 
+def is_restricted(hk_code: str) -> bool:
+    """Whether the A-share is blocked for US investors (NS-CMIC / BIS Entity List)."""
+    pair = _AH_PAIRS.get(_normalize_hk_code(hk_code))
+    return pair.get("is_restricted") == "true" if pair else False
+
+
 def get_all_pairs_meta() -> list[dict[str, str]]:
     """Return raw CSV rows including status/is_red_chip — for admin views and discovery."""
     return _load_csv()
@@ -175,6 +186,7 @@ def add_pair(
                 "name": name or "",
                 "status": "active",
                 "is_red_chip": "true" if is_red_chip else "false",
+                "is_restricted": "false",
                 "source": source,
                 "first_seen": date.today().strftime("%Y-%m-%d"),
             })
