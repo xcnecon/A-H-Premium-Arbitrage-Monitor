@@ -1,6 +1,7 @@
 """A/H Premium Arbitrage Monitor — Streamlit Dashboard."""
 
 import logging
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -731,10 +732,103 @@ def _recent_alerts_panel() -> None:
             st.caption(f"{icon} {h['hk_code']} {dir_icon} {prem_s} ({ts})")
 
 
+# ─── Trade size calculator (USD → A/H share counts) ───
+def _get_usd_hkd_cached() -> float:
+    """Session-state-cached USD/HKD (1 hour TTL — peg barely moves)."""
+    age = time.time() - st.session_state.get("_usdhkd_ts", 0)
+    if age < 3600 and "_usdhkd_rate" in st.session_state:
+        return st.session_state["_usdhkd_rate"]
+    rate = get_usd_hkd_latest()
+    st.session_state["_usdhkd_rate"] = rate
+    st.session_state["_usdhkd_ts"] = time.time()
+    return rate
+
+
+def _trade_panel() -> None:
+    """Inline USD → A/H share-count calculator (sidebar).
+
+    The sidebar renders before `_chart_panel`, so `_chart_h_price` etc. are
+    not populated on first render. Fall back to the watchlist's batch
+    snapshots (`_h_snaps`/`_a_snaps`) — those are populated by
+    `_watchlist_panel` which runs immediately above `_trade_panel` in the
+    sidebar flow.
+    """
+    hk = st.session_state.get("selected_hk", "")
+    if not hk:
+        st.caption("Select a stock to size a trade.")
+        return
+
+    a_code = get_a_code(hk)
+    if not a_code:
+        return
+
+    h_snaps = st.session_state.get("_h_snaps", {}) or {}
+    a_snaps = st.session_state.get("_a_snaps", {}) or {}
+    h_snap = h_snaps.get(hk)
+    a_snap = a_snaps.get(a_code)
+
+    h_price = float(
+        st.session_state.get("_chart_h_price")
+        or (h_snap["price"] if h_snap and h_snap.get("price", 0) > 0 else 0)
+        or st.session_state.get("_last_h_close")
+        or 0.0
+    )
+    a_price = float(
+        st.session_state.get("_chart_a_price")
+        or (a_snap["price"] if a_snap and a_snap.get("price", 0) > 0 else 0)
+        or st.session_state.get("_last_a_close")
+        or 0.0
+    )
+    fx = float(
+        st.session_state.get("_fx_rate")
+        or st.session_state.get("fx_spot")
+        or 0.0
+    )
+    usd_hkd = _get_usd_hkd_cached()
+
+    if not h_price or not a_price or not fx:
+        st.caption("Waiting for price data…")
+        return
+
+    usd = st.number_input(
+        "USD per leg",
+        min_value=100.0,
+        value=float(st.session_state.get("_trade_usd", 10000.0)),
+        step=500.0,
+        format="%.0f",
+        key="_trade_usd",
+        label_visibility="collapsed",
+    )
+
+    usd_cnh = usd_hkd * fx
+    hkd_side = usd * usd_hkd
+    cny_side = usd * usd_cnh
+    a_shares = math.ceil((cny_side / a_price) / 1000) * 1000
+    h_shares = math.ceil((hkd_side / h_price) / 1000) * 1000
+
+    h_cost_hkd = h_shares * h_price
+    a_cost_cny = a_shares * a_price
+
+    c1, c2 = st.columns(2)
+    c1.metric(f"HK.{hk}", f"{h_shares:,}")
+    c2.metric(f"A.{a_code}", f"{a_shares:,}")
+    st.caption(f"HK${h_cost_hkd:,.0f} · ¥{a_cost_cny:,.0f}")
+    st.markdown(
+        '<span style="color:#DC2626;font-weight:600;font-size:0.75rem;">'
+        "Follow trading rules before placing orders"
+        "</span>",
+        unsafe_allow_html=True,
+    )
+
+
 with st.sidebar:
     st.toggle("Dark Mode", key="dark_mode")
     st.markdown("#### Watchlist")
     _watchlist_panel()
+
+    # ── Trade size calculator ──
+    st.markdown("#### Trade")
+    _trade_panel()
 
     # ── Alert Configuration ──
     st.markdown("#### Alerts")
@@ -877,79 +971,6 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
     return fig
 
 
-# ─── Trade size calculator (USD → A/H share counts) ───
-@st.dialog("Trade Size Calculator", width="medium")
-def _trade_dialog(
-    hk_code: str,
-    a_code: str,
-    name: str,
-    h_price: float,
-    a_price: float,
-    fx_rate: float,
-    usd_hkd: float,
-) -> None:
-    """Convert a USD budget into tradeable A/H share counts."""
-    st.caption(f"{name} — HK.{hk_code} / A.{a_code}")
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("H Price", f"HK${h_price:.3f}" if h_price else "—")
-    m2.metric("A Price", f"¥{a_price:.3f}" if a_price else "—")
-    m3.metric("USD→HKD", f"{usd_hkd:.4f}")
-    m4.metric("HKD→CNH", f"{fx_rate:.4f}")
-
-    if not h_price or not a_price:
-        st.warning("Live prices not available — open the chart first.")
-        return
-
-    premium = (h_price * fx_rate / a_price - 1) * 100
-
-    usd = st.number_input(
-        "USD per leg ($)",
-        min_value=100.0,
-        value=float(st.session_state.get("_trade_usd", 10000.0)),
-        step=500.0,
-        format="%.0f",
-        key="_trade_usd",
-    )
-
-    import math
-
-    usd_cnh = usd_hkd * fx_rate  # derive USD/CNH via peg × HKD/CNH
-
-    hkd_side = usd * usd_hkd
-    cny_side = usd * usd_cnh
-    a_shares = math.ceil((cny_side / a_price) / 1000) * 1000 if a_price > 0 else 0
-    h_shares = math.ceil((hkd_side / h_price) / 1000) * 1000 if h_price > 0 else 0
-
-    a_cost_cny = a_shares * a_price
-    h_cost_hkd = h_shares * h_price
-    a_cost_usd = a_cost_cny / usd_cnh if usd_cnh > 0 else 0
-    h_cost_usd = h_cost_hkd / usd_hkd if usd_hkd > 0 else 0
-    total_usd = a_cost_usd + h_cost_usd
-
-    st.divider()
-    r1, r2 = st.columns(2)
-    with r1:
-        st.markdown("**H-share leg**")
-        st.metric("H shares", f"{h_shares:,}")
-        st.caption(f"HK${h_cost_hkd:,.0f} ≈ US${h_cost_usd:,.0f}")
-    with r2:
-        st.markdown("**A-share leg**")
-        st.metric("A shares", f"{a_shares:,}")
-        st.caption(f"¥{a_cost_cny:,.0f} ≈ US${a_cost_usd:,.0f}")
-
-    st.caption(
-        f"Total notional US${total_usd:,.0f} (≈2× US${usd:,.0f}) · "
-        f"Current H premium {premium:+.2f}%"
-    )
-    st.markdown(
-        '<span style="color:#DC2626;font-weight:600;">'
-        "Make sure to follow trading rules before placing the orders"
-        "</span>",
-        unsafe_allow_html=True,
-    )
-
-
 # ─── Chart fragment: data loading + live updates + rendering ───
 @st.fragment(run_every=timedelta(seconds=10))
 def _chart_panel(timeframe: str) -> None:
@@ -964,6 +985,22 @@ def _chart_panel(timeframe: str) -> None:
         return
 
     stock_name = get_pair_name(display_hk) or display_hk
+    # Exchange marker: Shanghai (沪) for 6xxxxx / 688xxx, Shenzhen (深) for
+    # 0xxxxx / 30xxxx, Beijing (北) for 8xxxxx / 43xxxx / 83xxxx.
+    if a_code.startswith("6"):
+        exch_char, exch_title = "\u6caa", "Shanghai Stock Exchange"
+    elif a_code.startswith(("0", "3")):
+        exch_char, exch_title = "\u6df1", "Shenzhen Stock Exchange"
+    elif a_code.startswith(("4", "8")):
+        exch_char, exch_title = "\u5317", "Beijing Stock Exchange"
+    else:
+        exch_char = exch_title = ""
+    exch_mark = (
+        f' <span style="color:#4f46e5;font-weight:700;" '
+        f'title="{exch_title}">{exch_char}</span>'
+        if exch_char
+        else ""
+    )
     restricted_mark = (
         ' <span style="color:#e53935;font-weight:700;" '
         'title="A-share is on US sanctions list — brokers may block trading">限</span>'
@@ -971,7 +1008,7 @@ def _chart_panel(timeframe: str) -> None:
         else ""
     )
     st.markdown(
-        f"### {stock_name}  `HK.{display_hk}` / `A.{a_code}`{restricted_mark}",
+        f"### {stock_name}  `HK.{display_hk}` / `A.{a_code}`{exch_mark}{restricted_mark}",
         unsafe_allow_html=True,
     )
 
@@ -1150,15 +1187,17 @@ def _chart_panel(timeframe: str) -> None:
         else st.session_state.get("_last_h_close")
     )
 
-    cols = st.columns(8)
+    usd_hkd = _get_usd_hkd_cached()
+    cols = st.columns(9)
     cols[0].metric("A Price (¥)", f"{a_price_disp:.2f}" if a_price_disp else "—")
     cols[1].metric("H Price (HK$)", f"{h_price_disp:.2f}" if h_price_disp else "—")
     cols[2].metric("H Premium", f"{premium_pct:+.2f}%")
     cols[3].metric("FX (CNH/HKD)", f"{fx:.4f}")
-    cols[4].metric("1D H/A Vol", f"{vol_ratio_1d:.2f}x")
-    cols[5].metric("7D H/A Vol", f"{vol_ratio_7d:.2f}x")
-    cols[6].metric("7D H Avg Vol", f"{h_vol_avg_7d / 1e6:.1f}M")
-    cols[7].metric("H Vol Today", f"{h_vol_today / 1e6:.1f}M")
+    cols[4].metric("USD/HKD", f"{usd_hkd:.4f}")
+    cols[5].metric("1D H/A Vol", f"{vol_ratio_1d:.2f}x")
+    cols[6].metric("7D H/A Vol", f"{vol_ratio_7d:.2f}x")
+    cols[7].metric("7D H Avg Vol", f"{h_vol_avg_7d / 1e6:.1f}M")
+    cols[8].metric("H Vol Today", f"{h_vol_today / 1e6:.1f}M")
 
     # Reuse cached figure if prices haven't changed (avoids expensive rebuild + serialization)
     if data_changed or "_cached_fig" not in st.session_state:
@@ -1183,9 +1222,7 @@ tab_chart, tab_screener = st.tabs(
 )
 
 with tab_chart:
-    col_ticker, col_tf, col_trade, col_add = st.columns(
-        [4, 3, 1, 1], vertical_alignment="bottom"
-    )
+    col_ticker, col_tf, col_add = st.columns([4, 3, 1], vertical_alignment="bottom")
     with col_ticker:
         st.selectbox(
             "Stock",
@@ -1215,48 +1252,8 @@ with tab_chart:
                 if a:
                     add_pair(hk, a, name)
                     st.rerun()
-    with col_trade:
-        trade_clicked = st.button(
-            "Trade",
-            width="stretch",
-            help="Compute share quantities for a USD budget",
-        )
 
     _chart_panel(timeframe)
-
-    if trade_clicked:
-        hk = st.session_state.get("selected_hk", "")
-        if not hk:
-            st.toast("Select a stock first", icon="\u26a0\ufe0f")
-        else:
-            a = get_a_code(hk) or ""
-            nm = get_pair_name(hk) or hk
-            h_px = (
-                st.session_state.get("_chart_h_price")
-                or st.session_state.get("_last_h_close")
-                or 0.0
-            )
-            a_px = (
-                st.session_state.get("_chart_a_price")
-                or st.session_state.get("_last_a_close")
-                or 0.0
-            )
-            fx = (
-                st.session_state.get("_fx_rate")
-                or st.session_state.get("fx_spot")
-                or 0.0
-            )
-            # USD/HKD barely moves (peg band 7.75–7.85); cache 1 hour
-            uh_age = time.time() - st.session_state.get("_usdhkd_ts", 0)
-            if uh_age < 3600 and "_usdhkd_rate" in st.session_state:
-                usd_hkd = st.session_state["_usdhkd_rate"]
-            else:
-                usd_hkd = get_usd_hkd_latest()
-                st.session_state["_usdhkd_rate"] = usd_hkd
-                st.session_state["_usdhkd_ts"] = time.time()
-            _trade_dialog(
-                hk, a, nm, float(h_px), float(a_px), float(fx), float(usd_hkd)
-            )
 
 
 @st.fragment(run_every=timedelta(seconds=20))
