@@ -92,6 +92,7 @@ def _build_indexes(
             "a_code": a,
             "name": r.get("name", ""),
             "is_restricted": r.get("is_restricted", "false"),
+            "is_red_chip": r.get("is_red_chip", "false"),
         }
         if a not in reverse:
             reverse[a] = hk
@@ -148,6 +149,12 @@ def is_restricted(hk_code: str) -> bool:
     """Whether the A-share is blocked for US investors (NS-CMIC / BIS Entity List)."""
     pair = _AH_PAIRS.get(_normalize_hk_code(hk_code))
     return pair.get("is_restricted") == "true" if pair else False
+
+
+def is_red_chip(hk_code: str) -> bool:
+    """Whether the HK-listed entity is a red-chip (incorporated outside mainland China)."""
+    pair = _AH_PAIRS.get(_normalize_hk_code(hk_code))
+    return pair.get("is_red_chip") == "true" if pair else False
 
 
 def get_all_pairs_meta() -> list[dict[str, str]]:

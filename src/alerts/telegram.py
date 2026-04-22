@@ -4,6 +4,7 @@ Uses raw httpx for synchronous HTTP — no event loop conflicts with Streamlit.
 """
 
 import logging
+import os
 import time
 
 import httpx
@@ -34,6 +35,15 @@ def send_alert(
     Returns:
         True if message sent successfully, False otherwise.
     """
+    # Belt-and-suspenders: test suite leaked real Telegram messages to the user's
+    # chat when a test's `patch("src.alerts.telegram.send_alert", ...)` silently
+    # failed (the prior test's `patch.dict("sys.modules", ...)` evicted this
+    # module on exit — see tests/conftest.py). Even with the conftest fix,
+    # short-circuit under pytest so a future mock regression can't spam chat.
+    # PYTEST_CURRENT_TEST is set by pytest for the duration of every test.
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        logger.debug("Telegram send_alert suppressed under pytest")
+        return False
     token = TELEGRAM_BOT_TOKEN
     if not token:
         logger.debug("Telegram token not configured, skipping alert")

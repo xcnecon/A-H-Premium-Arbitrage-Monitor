@@ -45,6 +45,24 @@ else:
 
 os.environ["AH_ARB_PAIRS_CSV"] = str(_TEST_CSV)
 
+# Pre-load modules that tests later reach via `patch("module.path.attr", ...)`
+# but that production code only imports lazily.
+#
+# Why: `patch.dict("sys.modules", {"akshare": fake})` (used by
+# test_tencent_unknown_* and test_tencent_unknown_skips_known_pairs) snapshots
+# sys.modules on enter and **restores that exact snapshot on exit** — meaning
+# any module loaded inside the block is EVICTED. `_tencent_alert_unknown`
+# lazily imports src.alerts.telegram, so that module got evicted when the
+# test block exited. The next test's
+# `patch("src.alerts.telegram.send_alert", fake)` then silently failed, the
+# real send_alert ran, and the user received real Telegram messages with
+# test-fixture data (ZZZ02 / DeadA Corp / 999999).
+#
+# Importing telegram here puts it in the sys.modules snapshot that every
+# patch.dict block captures on enter, so patch.dict's restore-on-exit
+# preserves it instead of evicting it.
+import src.alerts.telegram  # noqa: E402,F401
+
 
 @pytest.fixture(autouse=True)
 def _csv_snapshot_around_test():

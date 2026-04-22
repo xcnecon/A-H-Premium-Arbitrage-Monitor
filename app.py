@@ -14,7 +14,13 @@ from plotly.subplots import make_subplots
 from src.alerts.checker import evaluate_alerts
 from src.calc.premium import compute_premium_pct, compute_ratio_ohlcv
 from src.calc.screener import compute_screener_table
-from src.data.ah_mapping import get_a_code, get_all_pairs, get_pair_name, is_restricted
+from src.data.ah_mapping import (
+    get_a_code,
+    get_all_pairs,
+    get_pair_name,
+    is_red_chip,
+    is_restricted,
+)
 from src.data.akshare_client import get_a_kline
 from src.data.futu_client import get_h_kline
 from src.data.fx_client import get_fx_latest, get_fx_range, get_usd_hkd_latest
@@ -1007,8 +1013,14 @@ def _chart_panel(timeframe: str) -> None:
         if is_restricted(display_hk)
         else ""
     )
+    red_chip_mark = (
+        ' <span style="color:#dc2626;font-weight:700;" '
+        'title="Red chip — HK-listed entity incorporated outside mainland China">红</span>'
+        if is_red_chip(display_hk)
+        else ""
+    )
     st.markdown(
-        f"### {stock_name}  `HK.{display_hk}` / `A.{a_code}`{exch_mark}{restricted_mark}",
+        f"### {stock_name}  `HK.{display_hk}`{red_chip_mark} / `A.{a_code}`{exch_mark}{restricted_mark}",
         unsafe_allow_html=True,
     )
 
