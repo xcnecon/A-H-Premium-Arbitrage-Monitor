@@ -803,8 +803,8 @@ def _trade_panel() -> None:
     usd_cnh = usd_hkd * fx
     hkd_side = usd * usd_hkd
     cny_side = usd * usd_cnh
-    a_shares = math.ceil((cny_side / a_price) / 1000) * 1000
-    h_shares = math.ceil((hkd_side / h_price) / 1000) * 1000
+    a_shares = math.ceil((cny_side / a_price) / 100) * 100
+    h_shares = math.ceil((hkd_side / h_price) / 100) * 100
 
     h_cost_hkd = h_shares * h_price
     a_cost_cny = a_shares * a_price
