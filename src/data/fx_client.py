@@ -38,6 +38,16 @@ _fx_fetch_lock = threading.Lock()
 _yahoo_cooldown_until = 0.0  # epoch seconds; skip Yahoo entirely while in cooldown
 _YAHOO_COOLDOWN_AFTER_429 = 300.0  # 5 minutes — long enough for Yahoo's per-cookie limit to relax
 
+# In-memory short-circuit for fallback values. We do NOT persist fallback rates
+# to the SQLite cache: doing so poisons subsequent days, because the next call
+# finds yesterday's fake-fallback row via _check_cache_today_or_yesterday and
+# never tries the network again. Instead, when all sources fail we cache the
+# fallback value here for a short window so concurrent fragment refreshes in
+# the same process don't each fire the full probe chain.
+_fallback_value_until = 0.0
+_fallback_value: float | None = None
+_FALLBACK_TTL = 300.0  # 5 minutes
+
 
 def _get_yf_session():
     """Lazily create a curl_cffi session for yfinance."""
@@ -268,6 +278,13 @@ def get_fx_latest() -> float:
         if cached is not None:
             return cached
 
+        # In-memory fallback short-circuit. If we recently fell through to a
+        # fallback within the same process, return it directly instead of
+        # re-running the full probe chain on every fragment refresh.
+        global _fallback_value_until, _fallback_value
+        if _fallback_value is not None and time.time() < _fallback_value_until:
+            return _fallback_value
+
         # Cache miss — fetch from network. _yahoo_fx_latest self-skips when
         # in cooldown so we don't retry every few seconds after a 429.
         for name, fn in [("Yahoo", _yahoo_fx_latest), ("AKShare", _akshare_fx_spot)]:
@@ -283,21 +300,22 @@ def get_fx_latest() -> float:
             except Exception as e:
                 logger.warning("FX latest from %s failed: %s", name, e)
 
-        # Any cached value at all — fall through to the most recent historical rate.
-        # Persist it to today's slot so subsequent calls hit the fast path and
-        # don't re-enter this network branch on every fragment refresh.
+        # All live sources failed — fall through to the most recent historical
+        # rate. Cache only in memory: persisting the fallback to today's slot
+        # would make tomorrow's _check_cache_today_or_yesterday hit it and skip
+        # the network entirely, freezing the rate for as long as the app keeps
+        # running (the bug we used to ship with).
         recent = get_fx_range_cached("2020-01-01", today.isoformat())
         if not recent.empty and "rate" in recent.columns:
             rate = float(recent.iloc[-1]["rate"])
-            logger.info("FX from historical cache: %.5f (caching as today)", rate)
-            save_fx_rates(pd.DataFrame([{"date": today, "rate": rate}]))
-            return rate
+            logger.info("FX from historical cache: %.5f (in-memory only)", rate)
+        else:
+            rate = DEFAULT_FX_RATE
+            logger.warning("All FX sources failed, using default %s", DEFAULT_FX_RATE)
 
-        logger.warning("All FX sources failed, using default %s", DEFAULT_FX_RATE)
-        # Cache default too — prevents the next call from repeating this whole
-        # 30-second-plus probe chain. A real rate will overwrite once Yahoo recovers.
-        save_fx_rates(pd.DataFrame([{"date": today, "rate": DEFAULT_FX_RATE}]))
-        return DEFAULT_FX_RATE
+        _fallback_value = rate
+        _fallback_value_until = time.time() + _FALLBACK_TTL
+        return rate
 
 
 def get_fx_range(start: str, end: str) -> pd.DataFrame:
