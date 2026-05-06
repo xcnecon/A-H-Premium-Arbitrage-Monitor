@@ -16,7 +16,9 @@ import urllib.request
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
+from datetime import time as dtime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from futu import RET_OK, AuType, KLType, OpenQuoteContext
@@ -41,6 +43,8 @@ logger = logging.getLogger(__name__)
 _bg_sync_lock = threading.Lock()
 _a_trade_dates_cache: set[date] | None = None
 _HOLIDAY_CN_URL = "https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/{year}.json"
+_HKT = ZoneInfo("Asia/Hong_Kong")
+_DAILY_SNAPSHOT_READY_TIME = dtime(16, 15)
 
 
 def _prev_trading_day(d: date) -> date:
@@ -53,6 +57,28 @@ def _prev_trading_day(d: date) -> date:
     while prev.weekday() >= 5:  # Sat=5, Sun=6
         prev -= timedelta(days=1)
     return prev
+
+
+def _is_daily_snapshot_ready(now: datetime | None = None) -> bool:
+    """Return True when today's A/H snapshots are safe to persist as daily bars."""
+    current = now or datetime.now(_HKT)
+    current = current.replace(tzinfo=_HKT) if current.tzinfo is None else current.astimezone(_HKT)
+    return current.time() >= _DAILY_SNAPSHOT_READY_TIME
+
+
+def _snapshot_date(s: dict | None) -> str | None:
+    """Extract YYYY-MM-DD from a quote snapshot timestamp if present."""
+    if not s:
+        return None
+    value = s.get("update_time") or s.get("quote_time")
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    if len(text) >= 8 and text[:8].isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    return None
 
 
 def _get_a_trade_dates() -> set[date]:
@@ -192,15 +218,19 @@ def sync_all(
     prev_a_td_str = prev_a_td.strftime("%Y-%m-%d")
     is_a_trading_day = _is_a_trading_day(today)
     is_weekday = today.weekday() < 5
+    daily_snapshot_ready = _is_daily_snapshot_ready()
+    h_hist_end_str = today_str if is_weekday and daily_snapshot_ready else prev_h_td_str
     logger.info(
         "Sync boundary: today=%s prev_h_td=%s prev_prev_h_td=%s prev_a_td=%s "
-        "is_weekday=%s is_a_trading_day=%s",
+        "is_weekday=%s is_a_trading_day=%s daily_snapshot_ready=%s h_hist_end=%s",
         today_str,
         prev_h_td_str,
         prev_prev_h_td_str,
         prev_a_td_str,
         is_weekday,
         is_a_trading_day,
+        daily_snapshot_ready,
+        h_hist_end_str,
     )
 
     all_meta = get_all_sync_meta()
@@ -297,7 +327,7 @@ def sync_all(
         h_count += _sync_h_klines_hist(
             {hk: pairs[hk] for hk in all_hist_h},
             default_start,
-            today_str,
+            h_hist_end_str,
             progress_cb,
             errors,
         )
@@ -358,6 +388,13 @@ def sync_all(
         "errors": errors,
         "elapsed_s": round(elapsed, 1),
     }
+    try:
+        from src.alerts.special_events import evaluate_special_events
+
+        summary["special_events"] = evaluate_special_events(pairs=pairs)
+    except Exception as e:
+        logger.warning("Special-event evaluation failed: %s", e)
+        errors.append(f"special_events:{e}")
     logger.info("Sync complete: %s", summary)
     return summary
 
@@ -381,18 +418,22 @@ def sync_background() -> dict[str, Any]:
         _bg_sync_lock.release()
 
 
-def _snapshot_has_full_ohlcv(s: dict | None) -> bool:
+def _snapshot_has_full_ohlcv(s: dict | None, expected_date: str | None = None) -> bool:
     """True iff the snapshot carries a real OHLCV bar worth caching.
 
     A snapshot with only ``price`` (and missing open/high/low/volume) used to
     be written as a degenerate bar (OHL=price, vol=0) that then pinned
-    ``sync_meta`` and blocked future re-fetches. Gate writes on this check so
-    incomplete snapshots leave the day unsynced — the next run's gap-fill
-    will pull real data via the historical API.
+    ``sync_meta`` and blocked future re-fetches.  A non-zero intraday snapshot
+    can still be incomplete, so callers also gate writes until after market
+    close and, when available, require the quote timestamp to match the target
+    date.
     """
     if not s:
         return False
     if s.get("price", 0) <= 0:
+        return False
+    quote_date = _snapshot_date(s)
+    if expected_date and quote_date and quote_date != expected_date:
         return False
     return (
         s.get("open", 0) > 0
@@ -411,10 +452,16 @@ def _sync_today_from_snapshots(
 
     Uses batch snapshot APIs — ~4 HTTP calls for all 169 stocks instead of
     169 individual historical API calls. Writes today's bar only if the
-    snapshot has full OHLCV; partial snapshots are skipped so the classifier
-    can pick up the gap via the historical API on the next run.
+    snapshot has full OHLCV after the HK close buffer; partial intraday
+    snapshots are skipped so the classifier can pick up the gap via the
+    historical API on the next run.
     """
     from src.calc.screener import _fetch_all_h_snapshots
+
+    today = datetime.strptime(today_str, "%Y-%m-%d").date()
+    if not _is_daily_snapshot_ready():
+        logger.info("Skipping daily snapshot cache before close: %s", today_str)
+        return 0
 
     hk_codes = list(pairs.keys())
     a_codes = [pairs[hk]["a_code"] for hk in hk_codes]
@@ -423,6 +470,8 @@ def _sync_today_from_snapshots(
     a_snaps = get_a_snapshots_batch(a_codes)
     fx = get_fx_latest()
     count = 0
+    h_is_weekday = today.weekday() < 5
+    a_is_trading_day = _is_a_trading_day(today)
 
     for hk in hk_codes:
         info = pairs[hk]
@@ -430,7 +479,8 @@ def _sync_today_from_snapshots(
 
         # ── H-share today's bar ──
         h = h_snaps.get(hk)
-        if _snapshot_has_full_ohlcv(h):
+        h_valid = h_is_weekday and _snapshot_has_full_ohlcv(h, today_str)
+        if h_valid:
             save_kline(
                 hk,
                 "H",
@@ -452,7 +502,8 @@ def _sync_today_from_snapshots(
 
         # ── A-share today's bar ──
         a = a_snaps.get(a_code)
-        if _snapshot_has_full_ohlcv(a):
+        a_valid = a_is_trading_day and _snapshot_has_full_ohlcv(a, today_str)
+        if a_valid:
             save_kline(
                 a_code,
                 "A",
@@ -473,7 +524,7 @@ def _sync_today_from_snapshots(
             update_sync_meta(a_code, "A", today_str)
 
         # ── Premium (only when both sides had valid bars) ──
-        if _snapshot_has_full_ohlcv(h) and _snapshot_has_full_ohlcv(a):
+        if h_valid and a_valid:
             ratio = (h["price"] * fx) / a["price"]
             h_turnover_cny = h.get("turnover", 0) * fx
             save_premium_daily(

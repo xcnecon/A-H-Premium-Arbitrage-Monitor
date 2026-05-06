@@ -127,6 +127,7 @@ def _fetch_sina(a_code: str) -> dict | None:
             "volume": int(float(fields[8])),
             "turnover": float(fields[9]),
             "prev_close": float(fields[2]),
+            "update_time": f"{fields[30]} {fields[31]}" if len(fields) > 31 else "",
         }
     except Exception as e:
         logger.warning("Sina fetch failed for %s: %s", a_code, e)
@@ -189,6 +190,7 @@ def _fetch_tencent(a_code: str) -> dict | None:
             "volume": volume_shares,
             "turnover": turnover_cny,
             "prev_close": float(fields[4]),
+            "update_time": fields[30] if len(fields) > 30 else "",
         }
     except Exception as e:
         logger.warning("Tencent fetch failed for %s: %s", a_code, e)
@@ -225,6 +227,7 @@ def get_h_snapshots_batch(codes: list[str]) -> dict[str, dict]:
                 "volume": int(row["volume"]),
                 "turnover": float(row["turnover"]),
                 "prev_close": float(row["prev_close_price"]),
+                "update_time": str(row.get("update_time", "")),
             }
         return result
     except Exception as e:
@@ -283,6 +286,7 @@ def _fetch_tencent_batch(codes: list[str]) -> dict[str, dict]:
                     "volume": int(volume_lots * 100),
                     "turnover": turnover_wan * 10_000,
                     "prev_close": prev_close,
+                    "update_time": fields[30] if len(fields) > 30 else "",
                 }
         except Exception as e:
             logger.warning("Tencent batch chunk %d–%d failed: %s", i, i + len(chunk_syms), e)
@@ -328,6 +332,7 @@ def _sina_batch_chunk(
                 "volume": int(float(fields[8])),
                 "turnover": float(fields[9]),
                 "prev_close": prev_close,
+                "update_time": f"{fields[30]} {fields[31]}" if len(fields) > 31 else "",
             }
     return result
 

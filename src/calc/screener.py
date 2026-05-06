@@ -9,8 +9,8 @@ import logging
 import pandas as pd
 from futu import RET_OK
 
-from src.data.futu_ctx import get_quote_ctx
 from src.data.ah_mapping import get_all_pairs
+from src.data.futu_ctx import get_quote_ctx
 from src.data.fx_client import get_fx_latest
 from src.data.realtime import get_a_snapshots_batch
 
@@ -73,6 +73,7 @@ def _fetch_all_h_snapshots(hk_codes: list[str], chunk_size: int = 400) -> dict[s
                         "low": float(row["low_price"]),
                         "volume": int(row["volume"]),
                         "turnover": float(row["turnover"]),
+                        "update_time": str(row.get("update_time", "")),
                     }
             else:
                 logger.warning("Futu chunk %d–%d failed: %s", i, i + len(chunk), str(data)[:100])

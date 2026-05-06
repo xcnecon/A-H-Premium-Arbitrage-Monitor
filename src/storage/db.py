@@ -133,6 +133,27 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_alert_history_time
         ON alert_history(created_at DESC)
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS special_event_state (
+            event_key            TEXT PRIMARY KEY,
+            event_type           TEXT NOT NULL,
+            hk_code              TEXT NOT NULL,
+            a_code               TEXT NOT NULL,
+            side                 TEXT NOT NULL,
+            status               TEXT NOT NULL,
+            started_date         TEXT NOT NULL,
+            last_seen_date       TEXT NOT NULL,
+            ended_date           TEXT,
+            evidence_json        TEXT,
+            notified_at          TEXT,
+            resolved_notified_at TEXT,
+            updated_at           TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_special_event_state_status
+        ON special_event_state(status, event_type)
+    """)
     conn.commit()
     logger.info("Database initialized at %s", DB_PATH)
 
