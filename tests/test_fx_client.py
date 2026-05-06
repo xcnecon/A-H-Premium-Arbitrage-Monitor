@@ -1,7 +1,7 @@
 import pandas as pd
 
 from src.data import fx_client
-from src.storage.db import _get_connection, init_db, save_fx_spot_rate
+from src.storage.db import _get_connection, get_fx_spot_cached, init_db, save_fx_spot_rate
 
 
 class _FakeResponse:
@@ -19,6 +19,9 @@ def _clear_fx_spot_cache(symbol: str) -> None:
     conn = _get_connection()
     conn.execute("DELETE FROM fx_spot_cache WHERE symbol = ?", (symbol,))
     conn.commit()
+    if symbol == "USDHKD":
+        fx_client._usdhkd_fallback_value = None
+        fx_client._usdhkd_fallback_value_until = 0.0
 
 
 def _clear_fx_daily_cache() -> None:
@@ -81,6 +84,26 @@ def test_usd_hkd_refreshes_stale_sqlite_cache(monkeypatch):
     assert fx_client.get_usd_hkd_latest() == 7.83456
 
 
+def test_usd_hkd_ignores_old_default_sqlite_cache(monkeypatch):
+    init_db()
+    _clear_fx_spot_cache("USDHKD")
+    save_fx_spot_rate("USDHKD", 7.80)
+    calls: list[str] = []
+
+    def _fake_eastmoney(symbol):
+        calls.append(symbol)
+        return 7.83456
+
+    def _raise_if_called(*args, **kwargs):
+        raise AssertionError("yfinance should not be called when Eastmoney works")
+
+    monkeypatch.setattr(fx_client, "_eastmoney_fx_latest", _fake_eastmoney)
+    monkeypatch.setattr(fx_client, "_yf_download", _raise_if_called)
+
+    assert fx_client.get_usd_hkd_latest() == 7.83456
+    assert calls == ["USDHKD"]
+
+
 def test_usd_hkd_falls_back_to_yahoo_when_eastmoney_fails(monkeypatch):
     init_db()
     _clear_fx_spot_cache("USDHKD")
@@ -117,7 +140,7 @@ def test_usd_hkd_falls_back_to_yahoo_when_eastmoney_payload_is_malformed(monkeyp
     assert calls == ["HKD=X"]
 
 
-def test_usd_hkd_fallback_is_cached(monkeypatch):
+def test_usd_hkd_default_fallback_is_memory_only(monkeypatch):
     init_db()
     _clear_fx_spot_cache("USDHKD")
     calls: list[str] = []
@@ -130,6 +153,7 @@ def test_usd_hkd_fallback_is_cached(monkeypatch):
     monkeypatch.setattr(fx_client, "_yf_download", _fake_download)
 
     assert fx_client.get_usd_hkd_latest() == 7.80
+    assert get_fx_spot_cached("USDHKD", ttl_seconds=3600) is None
     assert fx_client.get_usd_hkd_latest() == 7.80
     assert calls == ["HKD=X"]
 

@@ -55,6 +55,9 @@ _fallback_value: float | None = None
 _FALLBACK_TTL = 300.0  # 5 minutes
 _HKDCNH_CACHE_TTL_SECONDS = 60
 _USDHKD_CACHE_TTL_SECONDS = 3600
+_USDHKD_DEFAULT_RATE = 7.80
+_usdhkd_fallback_value_until = 0.0
+_usdhkd_fallback_value: float | None = None
 _EASTMONEY_TIMEOUT = 6.0
 _EASTMONEY_FX_URL = "https://push2delay.eastmoney.com/api/qt/ulist.np/get"
 _EASTMONEY_FX_SECIDS = {
@@ -276,15 +279,23 @@ def get_usd_hkd_latest() -> float:
     """Get the latest USD→HKD rate (HKD per 1 USD, ~7.80 peg band 7.75–7.85).
 
     Source: Eastmoney real-time FX first, Yahoo Finance ``HKD=X`` as fallback.
-    Falls back to 7.80 (peg center) if all sources are unreachable. Cached in
-    SQLite for 1 hour across Streamlit sessions.
+    Successful network quotes are cached in SQLite for 1 hour across Streamlit
+    sessions. The hardcoded 7.80 fallback is only cached in memory briefly, so
+    a transient source outage cannot poison the cross-session cache.
     """
     cached = get_fx_spot_cached("USDHKD", ttl_seconds=_USDHKD_CACHE_TTL_SECONDS)
     if cached is not None:
-        return cached
+        if abs(cached - _USDHKD_DEFAULT_RATE) > 1e-9:
+            return cached
+        logger.info("Ignoring old USD/HKD default fallback cached in SQLite")
+
+    global _usdhkd_fallback_value_until, _usdhkd_fallback_value
+    if _usdhkd_fallback_value is not None and time.time() < _usdhkd_fallback_value_until:
+        return _usdhkd_fallback_value
 
     rate = _eastmoney_fx_latest("USDHKD")
     if rate is not None:
+        _usdhkd_fallback_value = None
         save_fx_spot_rate("USDHKD", rate)
         logger.info("USD/HKD from Eastmoney: %.5f", rate)
         return rate
@@ -295,14 +306,16 @@ def get_usd_hkd_latest() -> float:
             for c in reversed(df["Close"].tolist()):
                 if pd.notna(c) and 7.70 < float(c) < 7.90:
                     rate = round(float(c), 5)
+                    _usdhkd_fallback_value = None
                     save_fx_spot_rate("USDHKD", rate)
                     return rate
     except Exception as e:
         logger.warning("USD/HKD fetch failed: %s", e)
 
-    rate = 7.80
-    save_fx_spot_rate("USDHKD", rate)
-    return rate
+    _usdhkd_fallback_value = _USDHKD_DEFAULT_RATE
+    _usdhkd_fallback_value_until = time.time() + _FALLBACK_TTL
+    logger.warning("All USD/HKD sources failed, using in-memory default %.2f", _USDHKD_DEFAULT_RATE)
+    return _USDHKD_DEFAULT_RATE
 
 
 # ─── Source 3: AKShare fx_spot_quote (live fallback) ───
