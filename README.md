@@ -10,8 +10,8 @@ Real-time monitor for A-share / H-share premium arbitrage opportunities across a
 - **Real-time premium monitoring** -- live H/A ratio and premium % updates every 5 seconds during market hours
 - **Historical charts** -- interactive line charts (Plotly) for A-share price, H-share price, and H/A premium ratio
 - **Premium screener** -- scan every active A/H pair at once to find the widest dislocations
-- **Telegram alerts** -- configurable threshold-based notifications when premium crosses user-defined levels
-- **FX rate tracking** -- live CNH/HKD rate from Yahoo Finance with SQLite caching and fallback sources
+- **Telegram alerts** -- configurable threshold notifications during the A/H overlap session (9:30--15:00 HKT)
+- **FX rate tracking** -- live HKD/CNH and USD/HKD rates from Yahoo Finance with SQLite caching and fallbacks
 - **Configurable watchlist** -- add/remove pairs from the sidebar; persisted in local SQLite
 
 ## Architecture
@@ -21,8 +21,8 @@ The project uses a hybrid data architecture because Futu OpenAPI does not serve 
 | Component | Source | Notes |
 |-----------|--------|-------|
 | H-share K-line & real-time | Futu OpenAPI (OpenD gateway) | Unadjusted prices; AKShare fallback |
-| A-share K-line & real-time | AKShare + Sina/Tencent HTTP | Tencent K-line source; Sina real-time |
-| FX rate (CNH/HKD) | Yahoo Finance | AKShare backup; cached daily in SQLite |
+| A-share K-line & real-time | AKShare + Sina/Tencent HTTP | Tencent K-line source; Sina real-time; A-share trading calendar skips mainland holidays |
+| FX rates (HKD/CNH, USD/HKD) | Yahoo Finance | HKD/CNH has AKShare backup and daily SQLite cache; USD/HKD has 1-hour SQLite spot cache |
 | Dashboard | Streamlit + Plotly | Fragment-based live updates (`run_every=5s`) |
 | Storage | SQLite (`~/.ah-arb/data.db`) | Watchlist, FX cache, K-line cache, sync metadata |
 | Scheduling | APScheduler | Background sync jobs for historical data |
@@ -79,7 +79,7 @@ All settings are loaded via `python-dotenv` in `src/config/settings.py`.
 streamlit run app.py
 ```
 
-The dashboard auto-refreshes every 5 seconds during market hours (9:15--16:15 UTC+8, weekdays). Outside market hours, only historical data is displayed.
+The dashboard uses Streamlit fragments for live updates: watchlist every 5 seconds, chart every 10 seconds, and screener every 20 seconds. Telegram premium alerts are sent only during the true A/H arbitrage overlap window (9:30--15:00 UTC+8, weekdays).
 
 - **A-share market hours**: 9:30--15:00 (UTC+8)
 - **H-share market hours**: 9:30--16:10 (UTC+8)
@@ -96,7 +96,7 @@ All calculations use **unadjusted prices** to ensure accurate cross-market compa
 
 A ratio > 1 (positive premium %) means the H-share trades at a premium to its A-share counterpart.
 
-The FX rate convention is CNH per 1 HKD (approximately 0.92).
+The FX label is HKD/CNH, quoted as CNH per 1 HKD (approximately 0.92).
 
 ## Project Structure
 
@@ -155,8 +155,8 @@ The project runs on both Windows and macOS. All file paths use `pathlib.Path` fo
 - **实时溢价监控** -- 盘中每 5 秒刷新 H/A 比值和溢价率
 - **历史走势图** -- 交互式折线图（Plotly），展示 A 股价格、H 股价格及 H/A 溢价比值
 - **溢价筛选器** -- 一键扫描全部 A/H 股，找出偏离最大的标的
-- **Telegram 预警** -- 溢价突破自定义阈值时推送通知
-- **汇率追踪** -- Yahoo Finance 实时离岸人民币/港币汇率，SQLite 缓存 + 多源备用
+- **Telegram 预警** -- 仅在 A/H 共同套利时段（HKT 9:30--15:00）推送阈值突破通知
+- **汇率追踪** -- Yahoo Finance 实时 HKD/CNH 与 USD/HKD 汇率，SQLite 缓存 + 多源备用
 - **自选股管理** -- 侧边栏添加/删除，本地 SQLite 持久化
 
 ## 数据架构
@@ -166,8 +166,8 @@ The project runs on both Windows and macOS. All file paths use `pathlib.Path` fo
 | 组件 | 数据源 | 说明 |
 |------|--------|------|
 | H 股行情（历史 + 实时） | 富途 OpenAPI（OpenD 网关） | 不复权价格；AKShare 备用 |
-| A 股行情（历史 + 实时） | AKShare + 新浪/腾讯 HTTP | 腾讯历史 K 线；新浪实时快照 |
-| 汇率（CNH/HKD） | Yahoo Finance | AKShare 备用；SQLite 日缓存 |
+| A 股行情（历史 + 实时） | AKShare + 新浪/腾讯 HTTP | 腾讯历史 K 线；新浪实时快照；A 股交易日历跳过内地假期 |
+| 汇率（HKD/CNH、USD/HKD） | Yahoo Finance | HKD/CNH 有 AKShare 备用并按日缓存；USD/HKD 使用 1 小时 SQLite spot 缓存 |
 | 前端 | Streamlit + Plotly | Fragment 局部刷新（`run_every=5s`） |
 | 存储 | SQLite（`~/.ah-arb/data.db`） | 自选股、汇率缓存、K 线缓存、同步元数据 |
 | 调度 | APScheduler | 后台历史数据同步任务 |
@@ -222,7 +222,7 @@ OPEND_PORT=11111
 streamlit run app.py
 ```
 
-盘中（UTC+8 9:15--16:15 工作日）每 5 秒自动刷新；非盘中时间仅展示历史数据。
+前端使用 Streamlit fragments 局部刷新：自选股每 5 秒、图表每 10 秒、筛选器每 20 秒。Telegram 溢价预警仅在真正 A/H 套利重叠时段（UTC+8 9:30--15:00，工作日）发送。
 
 - **A 股交易时段**：9:30--15:00（UTC+8）
 - **港股交易时段**：9:30--16:10（UTC+8）
@@ -236,7 +236,7 @@ streamlit run app.py
 | H/A 比值 | `(H股港币价 * 每港币离岸人民币) / A股人民币价` |
 | H 股溢价率 | `(比值 - 1) * 100%` |
 
-比值 > 1（溢价率为正）表示 H 股相对 A 股存在溢价。汇率约定为每 1 港币兑离岸人民币（约 0.92）。
+比值 > 1（溢价率为正）表示 H 股相对 A 股存在溢价。汇率显示为 HKD/CNH，约定为每 1 港币兑离岸人民币（约 0.92）。
 
 ## 开发
 
