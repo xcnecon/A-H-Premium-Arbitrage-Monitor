@@ -73,6 +73,12 @@ nosetests.xml
 run.sh
 
 # ===========================
+# Claude local config / agent notes
+# ===========================
+CLAUDE.md
+.claude/
+
+# ===========================
 # SQLite
 # ===========================
 *.db
