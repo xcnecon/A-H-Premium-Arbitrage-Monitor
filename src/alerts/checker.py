@@ -6,10 +6,15 @@ crossing in either direction.  Each stock supports up to 3 threshold levels.
 
 import logging
 import time
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.alerts.telegram import format_premium_alert, send_alert
-from src.config.settings import ALERT_BUFFER_PCT, ALERT_MAX_PER_MINUTE
+from src.config.settings import (
+    ALERT_BUFFER_PCT,
+    ALERT_MAX_PER_MINUTE,
+    MARKET_OVERLAP_END,
+    MARKET_OVERLAP_START,
+)
 from src.data.ah_mapping import get_a_code, get_pair_name
 from src.storage.db import (
     get_alert_rules,
@@ -36,6 +41,18 @@ def _is_rate_limited() -> bool:
 def _record_send() -> None:
     """Record a send for rate limiting."""
     _recent_sends.append(time.time())
+
+
+def _is_market_overlap(now: datetime | None = None) -> bool:
+    """True during the A/H arbitrage overlap window in HKT."""
+    now = now or datetime.now(_HKT)
+    if now.weekday() >= 5:
+        return False
+
+    current = now.time()
+    start = datetime.strptime(MARKET_OVERLAP_START, "%H:%M").time()
+    end = datetime.strptime(MARKET_OVERLAP_END, "%H:%M").time()
+    return start <= current <= end
 
 
 def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]:
@@ -117,6 +134,23 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
 
         # Always update side first so we don't re-fire on the next tick
         update_alert_state(rule_id, last_side=current_side, last_premium=premium)
+
+        if not _is_market_overlap():
+            logger.info(
+                "Skipping Telegram alert outside A/H overlap window (%s-%s HKT): %s",
+                MARKET_OVERLAP_START,
+                MARKET_OVERLAP_END,
+                hk_code,
+            )
+            log_alert_event(
+                rule_id,
+                hk_code,
+                cross_dir,
+                "outside_market_overlap",
+                premium,
+                detail=f"threshold={threshold:.1f}",
+            )
+            continue
 
         if _is_rate_limited():
             logger.warning("Rate limited, skipping notification for %s", hk_code)

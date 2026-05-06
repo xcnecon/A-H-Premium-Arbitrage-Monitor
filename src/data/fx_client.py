@@ -20,7 +20,13 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 
 from src.config.settings import DEFAULT_FX_RATE, YAHOO_PROXY, YAHOO_TIMEOUT
-from src.storage.db import get_fx_cached, get_fx_range_cached, save_fx_rates
+from src.storage.db import (
+    get_fx_cached,
+    get_fx_range_cached,
+    get_fx_spot_cached,
+    save_fx_rates,
+    save_fx_spot_rate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +53,7 @@ _YAHOO_COOLDOWN_AFTER_429 = 300.0  # 5 minutes — long enough for Yahoo's per-c
 _fallback_value_until = 0.0
 _fallback_value: float | None = None
 _FALLBACK_TTL = 300.0  # 5 minutes
+_USDHKD_CACHE_TTL_SECONDS = 3600
 
 
 def _get_yf_session():
@@ -121,7 +128,12 @@ def _yf_download(ticker: str, **kwargs) -> pd.DataFrame:
             elapsed = time.monotonic() - t0
             if df is not None and not df.empty:
                 if attempt > 1:
-                    logger.info("Yahoo %s succeeded on attempt %d (%.1fs)", ticker, attempt, elapsed)
+                    logger.info(
+                        "Yahoo %s succeeded on attempt %d (%.1fs)",
+                        ticker,
+                        attempt,
+                        elapsed,
+                    )
                 return df
             logger.debug("Yahoo %s returned empty on attempt %d (%.1fs)", ticker, attempt, elapsed)
         except Exception as e:
@@ -187,17 +199,26 @@ def get_usd_hkd_latest() -> float:
     """Get the latest USD→HKD rate (HKD per 1 USD, ~7.80 peg band 7.75–7.85).
 
     Source: Yahoo Finance ``HKD=X``. Falls back to 7.80 (peg center) if Yahoo
-    is unreachable. Rate moves <0.02% per day — cache at the caller.
+    is unreachable. Cached in SQLite for 1 hour across Streamlit sessions.
     """
+    cached = get_fx_spot_cached("USDHKD", ttl_seconds=_USDHKD_CACHE_TTL_SECONDS)
+    if cached is not None:
+        return cached
+
     try:
         df = _yf_download("HKD=X", period="5d", interval="1d")
         if not df.empty:
             for c in reversed(df["Close"].tolist()):
                 if pd.notna(c) and 7.70 < float(c) < 7.90:
-                    return round(float(c), 5)
+                    rate = round(float(c), 5)
+                    save_fx_spot_rate("USDHKD", rate)
+                    return rate
     except Exception as e:
         logger.warning("USD/HKD fetch failed: %s", e)
-    return 7.80
+
+    rate = 7.80
+    save_fx_spot_rate("USDHKD", rate)
+    return rate
 
 
 # ─── Source 2: AKShare fx_spot_quote (live fallback) ───

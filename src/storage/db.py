@@ -1,7 +1,7 @@
 import logging
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 
@@ -44,6 +44,13 @@ def init_db() -> None:
             rate REAL NOT NULL,
             source TEXT DEFAULT 'api',
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fx_spot_cache (
+            symbol TEXT PRIMARY KEY,
+            rate REAL NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.execute("""
@@ -245,6 +252,40 @@ def get_fx_range_cached(start: str, end: str) -> pd.DataFrame:
         for r in rows
     ]
     return pd.DataFrame(data)
+
+
+def save_fx_spot_rate(symbol: str, rate: float) -> None:
+    """Save a spot FX quote to the cross-session cache."""
+    with _write_lock:
+        conn = _get_connection()
+        conn.execute(
+            """
+            INSERT INTO fx_spot_cache (symbol, rate, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(symbol) DO UPDATE SET
+                rate = excluded.rate,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (symbol, float(rate)),
+        )
+        conn.commit()
+
+
+def get_fx_spot_cached(symbol: str, ttl_seconds: int) -> float | None:
+    """Return a cached spot FX quote if it is newer than ``ttl_seconds``."""
+    conn = _get_connection()
+    cursor = conn.execute(
+        "SELECT rate, updated_at FROM fx_spot_cache WHERE symbol = ?",
+        (symbol,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+
+    updated_at = datetime.strptime(row["updated_at"], "%Y-%m-%d %H:%M:%S")
+    if datetime.utcnow() - updated_at > timedelta(seconds=ttl_seconds):
+        return None
+    return float(row["rate"])
 
 
 # ---------------------------------------------------------------------------

@@ -8,9 +8,11 @@ Two sync modes:
 """
 
 import contextlib
+import json
 import logging
 import threading
 import time
+import urllib.request
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
@@ -37,6 +39,8 @@ logger = logging.getLogger(__name__)
 
 # Module-level lock: prevents concurrent background syncs from overlapping
 _bg_sync_lock = threading.Lock()
+_a_trade_dates_cache: set[date] | None = None
+_HOLIDAY_CN_URL = "https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/{year}.json"
 
 
 def _prev_trading_day(d: date) -> date:
@@ -49,6 +53,81 @@ def _prev_trading_day(d: date) -> date:
     while prev.weekday() >= 5:  # Sat=5, Sun=6
         prev -= timedelta(days=1)
     return prev
+
+
+def _get_a_trade_dates() -> set[date]:
+    """Return the A-share trading calendar from AKShare, cached per process."""
+    global _a_trade_dates_cache
+    if _a_trade_dates_cache is not None:
+        return _a_trade_dates_cache
+
+    try:
+        import akshare as ak
+
+        from src.data.akshare_client import _a_share_proxy_env
+
+        with _a_share_proxy_env():
+            df = ak.tool_trade_date_hist_sina()
+        if df is None or df.empty or "trade_date" not in df.columns:
+            raise ValueError("empty A-share trading calendar")
+        trade_dates = set(pd.to_datetime(df["trade_date"]).dt.date)
+        logger.info("Loaded %d A-share trading dates", len(trade_dates))
+        _a_trade_dates_cache = trade_dates
+    except Exception as e:
+        logger.warning("A-share trading calendar unavailable, trying holiday-cn fallback: %s", e)
+        _a_trade_dates_cache = _get_a_trade_dates_from_holiday_cn()
+    return _a_trade_dates_cache
+
+
+def _get_a_trade_dates_from_holiday_cn() -> set[date]:
+    """Approximate A-share trading days from mainland holiday notices."""
+    today = date.today()
+    years = [today.year - 1, today.year]
+    trade_dates: set[date] = set()
+
+    try:
+        for year in years:
+            with urllib.request.urlopen(_HOLIDAY_CN_URL.format(year=year), timeout=5) as resp:
+                payload = json.load(resp)
+            off_days = {
+                datetime.strptime(day["date"], "%Y-%m-%d").date()
+                for day in payload.get("days", [])
+                if day.get("isOffDay")
+            }
+
+            current = date(year, 1, 1)
+            end = date(year, 12, 31)
+            while current <= end:
+                if current.weekday() < 5 and current not in off_days:
+                    trade_dates.add(current)
+                current += timedelta(days=1)
+    except Exception as e:
+        logger.warning("holiday-cn fallback unavailable, falling back to weekdays: %s", e)
+        return set()
+
+    logger.info("Loaded %d approximate A-share trading dates from holiday-cn", len(trade_dates))
+    return trade_dates
+
+
+def _is_a_trading_day(d: date) -> bool:
+    """True if *d* is an A-share trading day."""
+    trade_dates = _get_a_trade_dates()
+    if not trade_dates:
+        return d.weekday() < 5
+    return d in trade_dates
+
+
+def _prev_a_trading_day(d: date) -> date:
+    """Return the most recent A-share trading day before *d*."""
+    trade_dates = _get_a_trade_dates()
+    if not trade_dates:
+        return _prev_trading_day(d)
+
+    candidates = [td for td in trade_dates if td < d]
+    if not candidates:
+        return _prev_trading_day(d)
+    return max(candidates)
+
 
 # Futu rate limit: max 60 request_history_kline calls per 30 seconds.
 # Use a global lock so all worker threads share one throttle.
@@ -106,13 +185,22 @@ def sync_all(
     # yesterday) — 4 HTTP calls total instead of 169 per-stock calls.
     # Only multi-day gaps (2+ trading days) require the historical API.
     today = date.today()
-    prev_td = _prev_trading_day(today)
-    prev_td_str = prev_td.strftime("%Y-%m-%d")
-    prev_prev_td_str = _prev_trading_day(prev_td).strftime("%Y-%m-%d")
+    prev_h_td = _prev_trading_day(today)
+    prev_h_td_str = prev_h_td.strftime("%Y-%m-%d")
+    prev_prev_h_td_str = _prev_trading_day(prev_h_td).strftime("%Y-%m-%d")
+    prev_a_td = _prev_a_trading_day(today)
+    prev_a_td_str = prev_a_td.strftime("%Y-%m-%d")
+    is_a_trading_day = _is_a_trading_day(today)
     is_weekday = today.weekday() < 5
     logger.info(
-        "Sync boundary: today=%s prev_td=%s prev_prev_td=%s is_weekday=%s",
-        today_str, prev_td_str, prev_prev_td_str, is_weekday,
+        "Sync boundary: today=%s prev_h_td=%s prev_prev_h_td=%s prev_a_td=%s "
+        "is_weekday=%s is_a_trading_day=%s",
+        today_str,
+        prev_h_td_str,
+        prev_prev_h_td_str,
+        prev_a_td_str,
+        is_weekday,
+        is_a_trading_day,
     )
 
     all_meta = get_all_sync_meta()
@@ -127,17 +215,23 @@ def sync_all(
         # H-share classification
         if not last_h:
             need_full_h.append(hk)
-        elif last_h < prev_td_str:
-            need_gap_h.append(hk)  # prev_td missing → historical API
+        elif last_h < prev_h_td_str:
+            need_gap_h.append(hk)  # prev_h_td missing → historical API
         elif last_h < today_str and is_weekday:
             need_today.append(hk)  # only today missing → batch snapshot
 
         # A-share classification
+        a_needs_hist = False
         if not last_a:
             need_full_a.append(hk)
-        elif last_a < prev_td_str:
-            need_gap_a.append(hk)  # prev_td missing → historical API
-        elif last_a < today_str and is_weekday and hk not in need_today:
+            a_needs_hist = True
+        elif last_a < prev_a_td_str:
+            need_gap_a.append(hk)  # prev_a_td missing → historical API
+            a_needs_hist = True
+
+        if a_needs_hist and is_a_trading_day and hk not in need_today:
+            need_today.append(hk)  # historical A sync stops at prev_a_td; snapshot fills today
+        elif last_a < today_str and is_a_trading_day and hk not in need_today:
             need_today.append(hk)  # only today missing → batch snapshot
 
     skipped = (
@@ -214,7 +308,7 @@ def sync_all(
         a_count += _sync_a_klines_hist(
             {hk: pairs[hk] for hk in all_hist_a},
             default_start,
-            today_str,
+            prev_a_td_str,
             progress_cb,
             errors,
         )
@@ -515,7 +609,7 @@ def _sync_h_klines_hist(
 def _sync_a_klines_hist(
     pairs: dict[str, dict[str, str]],
     default_start: str,
-    today_str: str,
+    end_str: str,
     progress_cb: Callable[[str, int, int], None] | None,
     errors: list[str],
 ) -> int:
@@ -527,13 +621,13 @@ def _sync_a_klines_hist(
     for hk, info in pairs.items():
         a_code = info["a_code"]
         last = get_last_sync_date(a_code, "A")
-        if last and last >= today_str:
+        if last and last >= end_str:
             continue
         if last and last > default_start:
             start = (datetime.strptime(last, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         else:
             start = default_start
-        if start <= today_str:
+        if start <= end_str:
             tasks.append((a_code, start, hk))
 
     if not tasks:
@@ -546,7 +640,7 @@ def _sync_a_klines_hist(
     def _fetch_one(a_code: str, start: str, hk: str) -> int:
         nonlocal done
         try:
-            df = get_a_kline(a_code, start, today_str)
+            df = get_a_kline(a_code, start, end_str)
             if not df.empty:
                 df = df.copy()
                 df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")

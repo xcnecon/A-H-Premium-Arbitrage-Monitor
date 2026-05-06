@@ -740,14 +740,8 @@ def _recent_alerts_panel() -> None:
 
 # ─── Trade size calculator (USD → A/H share counts) ───
 def _get_usd_hkd_cached() -> float:
-    """Session-state-cached USD/HKD (1 hour TTL — peg barely moves)."""
-    age = time.time() - st.session_state.get("_usdhkd_ts", 0)
-    if age < 3600 and "_usdhkd_rate" in st.session_state:
-        return st.session_state["_usdhkd_rate"]
-    rate = get_usd_hkd_latest()
-    st.session_state["_usdhkd_rate"] = rate
-    st.session_state["_usdhkd_ts"] = time.time()
-    return rate
+    """SQLite-cached USD/HKD (1 hour TTL shared across Streamlit sessions)."""
+    return get_usd_hkd_latest()
 
 
 def _trade_panel() -> None:
@@ -1204,7 +1198,7 @@ def _chart_panel(timeframe: str) -> None:
     cols[0].metric("A Price (¥)", f"{a_price_disp:.2f}" if a_price_disp else "—")
     cols[1].metric("H Price (HK$)", f"{h_price_disp:.2f}" if h_price_disp else "—")
     cols[2].metric("H Premium", f"{premium_pct:+.2f}%")
-    cols[3].metric("FX (CNH/HKD)", f"{fx:.4f}")
+    cols[3].metric("FX (HKD/CNH)", f"{fx:.4f}")
     cols[4].metric("USD/HKD", f"{usd_hkd:.4f}")
     cols[5].metric("1D H/A Vol", f"{vol_ratio_1d:.2f}x")
     cols[6].metric("7D H/A Vol", f"{vol_ratio_7d:.2f}x")

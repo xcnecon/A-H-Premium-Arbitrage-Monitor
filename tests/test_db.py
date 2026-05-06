@@ -1,6 +1,14 @@
-"""Tests for SQLite watchlist."""
+"""Tests for SQLite storage helpers."""
 
-from src.storage.db import add_pair, get_pair, get_watchlist, init_db, remove_pair
+from src.storage.db import (
+    add_pair,
+    get_fx_spot_cached,
+    get_pair,
+    get_watchlist,
+    init_db,
+    remove_pair,
+    save_fx_spot_rate,
+)
 
 
 def test_init_db():
@@ -39,3 +47,10 @@ def test_duplicate_add():
     add_pair("99996", "699996", "Dup Test")
     add_pair("99996", "699996", "Dup Test")  # should not raise
     remove_pair("99996")
+
+
+def test_fx_spot_cache():
+    init_db()
+    save_fx_spot_rate("TESTUSDHKD", 7.81234)
+
+    assert get_fx_spot_cached("TESTUSDHKD", ttl_seconds=3600) == 7.81234
