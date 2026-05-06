@@ -11,7 +11,7 @@ Real-time monitor for A-share / H-share premium arbitrage opportunities across a
 - **Historical charts** -- interactive line charts (Plotly) for A-share price, H-share price, and H/A premium ratio
 - **Premium screener** -- scan every active A/H pair at once to find the widest dislocations
 - **Telegram alerts** -- configurable threshold notifications during the A/H overlap session (9:30--15:00 HKT)
-- **FX rate tracking** -- live HKD/CNH and USD/HKD rates from Yahoo Finance with SQLite caching and fallbacks
+- **FX rate tracking** -- live HKD/CNH and USD/HKD rates from Eastmoney with SQLite caching and fallbacks
 - **Configurable watchlist** -- add/remove pairs from the sidebar; persisted in local SQLite
 
 ## Architecture
@@ -22,7 +22,7 @@ The project uses a hybrid data architecture because Futu OpenAPI does not serve 
 |-----------|--------|-------|
 | H-share K-line & real-time | Futu OpenAPI (OpenD gateway) | Unadjusted prices; AKShare fallback |
 | A-share K-line & real-time | AKShare + Sina/Tencent HTTP | Tencent K-line source; Sina real-time; A-share trading calendar skips mainland holidays |
-| FX rates (HKD/CNH, USD/HKD) | Yahoo Finance | HKD/CNH has AKShare backup and daily SQLite cache; USD/HKD has 1-hour SQLite spot cache |
+| FX rates (HKD/CNH, USD/HKD) | Eastmoney + AKShare + Yahoo Finance fallback | HKD/CNH uses 60-second SQLite spot cache for intraday updates; USD/HKD uses 1-hour SQLite spot cache |
 | Dashboard | Streamlit + Plotly | Fragment-based live updates (`run_every=5s`) |
 | Storage | SQLite (`~/.ah-arb/data.db`) | Watchlist, FX cache, K-line cache, sync metadata |
 | Scheduling | APScheduler | Background sync jobs for historical data |
@@ -113,7 +113,7 @@ ah-arb/
 │   │   ├── pair_discovery.py   # Daily HKEX widget scan + Telegram alerts
 │   │   ├── futu_client.py      # H-share K-line (Futu, AKShare fallback)
 │   │   ├── akshare_client.py   # A-share K-line (Tencent source)
-│   │   ├── fx_client.py        # FX rates (Yahoo Finance, AKShare, SQLite cache)
+│   │   ├── fx_client.py        # FX rates (Eastmoney, AKShare, Yahoo fallback, SQLite cache)
 │   │   ├── realtime.py         # Live snapshots (Futu snapshot, Sina/Tencent HTTP)
 │   │   └── sync.py             # K-line sync orchestration
 │   ├── alerts/
@@ -156,7 +156,7 @@ The project runs on both Windows and macOS. All file paths use `pathlib.Path` fo
 - **历史走势图** -- 交互式折线图（Plotly），展示 A 股价格、H 股价格及 H/A 溢价比值
 - **溢价筛选器** -- 一键扫描全部 A/H 股，找出偏离最大的标的
 - **Telegram 预警** -- 仅在 A/H 共同套利时段（HKT 9:30--15:00）推送阈值突破通知
-- **汇率追踪** -- Yahoo Finance 实时 HKD/CNH 与 USD/HKD 汇率，SQLite 缓存 + 多源备用
+- **汇率追踪** -- 东方财富实时 HKD/CNH 与 USD/HKD 汇率，SQLite 缓存 + 多源备用
 - **自选股管理** -- 侧边栏添加/删除，本地 SQLite 持久化
 
 ## 数据架构
@@ -167,7 +167,7 @@ The project runs on both Windows and macOS. All file paths use `pathlib.Path` fo
 |------|--------|------|
 | H 股行情（历史 + 实时） | 富途 OpenAPI（OpenD 网关） | 不复权价格；AKShare 备用 |
 | A 股行情（历史 + 实时） | AKShare + 新浪/腾讯 HTTP | 腾讯历史 K 线；新浪实时快照；A 股交易日历跳过内地假期 |
-| 汇率（HKD/CNH、USD/HKD） | Yahoo Finance | HKD/CNH 有 AKShare 备用并按日缓存；USD/HKD 使用 1 小时 SQLite spot 缓存 |
+| 汇率（HKD/CNH、USD/HKD） | 东方财富 + AKShare + Yahoo Finance 兜底 | HKD/CNH 使用 60 秒 SQLite spot 缓存保留盘中更新；USD/HKD 使用 1 小时 SQLite spot 缓存 |
 | 前端 | Streamlit + Plotly | Fragment 局部刷新（`run_every=5s`） |
 | 存储 | SQLite（`~/.ah-arb/data.db`） | 自选股、汇率缓存、K 线缓存、同步元数据 |
 | 调度 | APScheduler | 后台历史数据同步任务 |

@@ -1,10 +1,11 @@
 """HKD/CNH exchange rate fetcher with SQLite caching.
 
 Sources (in priority order):
-  1. Yahoo Finance via yfinance — HKDCNH=X for live rate (offshore, tradeable)
-  2. Yahoo Finance via yfinance — HKDCNY=X for historical range (CNH has no
+  1. Eastmoney — real-time HKDCNH and USDHKD quotes
+  2. AKShare fx_spot_quote — live HKD/CNY spot backup
+  3. Yahoo Finance via yfinance — HKDCNH=X for live fallback (offshore, tradeable)
+  4. Yahoo Finance via yfinance — HKDCNY=X for historical range (CNH has no
      Yahoo history; CNY-CNH spread is typically < 0.1%, acceptable proxy)
-  3. AKShare fx_spot_quote — live spot only (backup)
 
 Robustness: yfinance calls go through a shared curl_cffi session with
 configurable timeout (YAHOO_TIMEOUT) and optional proxy (YAHOO_PROXY_URL).
@@ -17,11 +18,11 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 
+import httpx
 import pandas as pd
 
 from src.config.settings import DEFAULT_FX_RATE, YAHOO_PROXY, YAHOO_TIMEOUT
 from src.storage.db import (
-    get_fx_cached,
     get_fx_range_cached,
     get_fx_spot_cached,
     save_fx_rates,
@@ -45,15 +46,21 @@ _yahoo_cooldown_until = 0.0  # epoch seconds; skip Yahoo entirely while in coold
 _YAHOO_COOLDOWN_AFTER_429 = 300.0  # 5 minutes — long enough for Yahoo's per-cookie limit to relax
 
 # In-memory short-circuit for fallback values. We do NOT persist fallback rates
-# to the SQLite cache: doing so poisons subsequent days, because the next call
-# finds yesterday's fake-fallback row via _check_cache_today_or_yesterday and
-# never tries the network again. Instead, when all sources fail we cache the
-# fallback value here for a short window so concurrent fragment refreshes in
-# the same process don't each fire the full probe chain.
+# to the SQLite cache: doing so poisons the historical FX table with fake data.
+# Instead, when all sources fail we cache the fallback value here for a short
+# window so concurrent fragment refreshes in the same process don't each fire
+# the full probe chain.
 _fallback_value_until = 0.0
 _fallback_value: float | None = None
 _FALLBACK_TTL = 300.0  # 5 minutes
+_HKDCNH_CACHE_TTL_SECONDS = 60
 _USDHKD_CACHE_TTL_SECONDS = 3600
+_EASTMONEY_TIMEOUT = 6.0
+_EASTMONEY_FX_URL = "https://push2delay.eastmoney.com/api/qt/ulist.np/get"
+_EASTMONEY_FX_SECIDS = {
+    "HKDCNH": "133.HKDCNH",
+    "USDHKD": "119.USDHKD",
+}
 
 
 def _get_yf_session():
@@ -157,7 +164,77 @@ def _yf_download(ticker: str, **kwargs) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-# ─── Source 1: Yahoo Finance via yfinance (handles crumb/cookie auth) ───
+# ─── Source 1: Eastmoney real-time FX quotes ───
+
+
+def _eastmoney_fx_latest(symbol: str) -> float | None:
+    """Fetch a real-time FX quote from Eastmoney.
+
+    Supported symbols:
+        HKDCNH: CNH per 1 HKD
+        USDHKD: HKD per 1 USD
+    """
+    secid = _EASTMONEY_FX_SECIDS.get(symbol)
+    if not secid:
+        return None
+
+    payload = None
+    last_err: Exception | None = None
+    for attempt in range(1, 3):
+        try:
+            resp = httpx.get(
+                _EASTMONEY_FX_URL,
+                params={
+                    "fltt": "2",
+                    "fields": "f12,f13,f14,f2,f17,f18,f15,f16",
+                    "secids": secid,
+                },
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=_EASTMONEY_TIMEOUT,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            break
+        except (httpx.HTTPError, ValueError) as e:
+            last_err = e
+            logger.debug("Eastmoney FX %s attempt %d failed: %s", symbol, attempt, e)
+            if attempt == 1:
+                time.sleep(0.5)
+
+    if payload is None:
+        logger.warning("Eastmoney FX %s failed: %s", symbol, last_err)
+        return None
+
+    if not isinstance(payload, dict):
+        logger.debug("Eastmoney FX %s returned non-object payload: %s", symbol, payload)
+        return None
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        logger.debug("Eastmoney FX %s returned invalid data payload: %s", symbol, payload)
+        return None
+
+    rows = data.get("diff")
+    if not isinstance(rows, list):
+        logger.debug("Eastmoney FX %s returned invalid diff payload: %s", symbol, payload)
+        return None
+
+    for row in rows:
+        if not isinstance(row, dict) or row.get("f12") != symbol:
+            continue
+        try:
+            rate = float(row["f2"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if symbol == "USDHKD" and 7.70 < rate < 7.90:
+            return round(rate, 5)
+        if symbol == "HKDCNH" and 0.5 < rate < 1.5:
+            return round(rate, 6)
+    logger.debug("Eastmoney FX %s returned no valid quote: %s", symbol, payload)
+    return None
+
+
+# ─── Source 2: Yahoo Finance via yfinance (handles crumb/cookie auth) ───
 
 
 def _yahoo_fx_history(start: str, end: str) -> pd.DataFrame:
@@ -198,12 +275,19 @@ def _yahoo_fx_latest() -> float | None:
 def get_usd_hkd_latest() -> float:
     """Get the latest USD→HKD rate (HKD per 1 USD, ~7.80 peg band 7.75–7.85).
 
-    Source: Yahoo Finance ``HKD=X``. Falls back to 7.80 (peg center) if Yahoo
-    is unreachable. Cached in SQLite for 1 hour across Streamlit sessions.
+    Source: Eastmoney real-time FX first, Yahoo Finance ``HKD=X`` as fallback.
+    Falls back to 7.80 (peg center) if all sources are unreachable. Cached in
+    SQLite for 1 hour across Streamlit sessions.
     """
     cached = get_fx_spot_cached("USDHKD", ttl_seconds=_USDHKD_CACHE_TTL_SECONDS)
     if cached is not None:
         return cached
+
+    rate = _eastmoney_fx_latest("USDHKD")
+    if rate is not None:
+        save_fx_spot_rate("USDHKD", rate)
+        logger.info("USD/HKD from Eastmoney: %.5f", rate)
+        return rate
 
     try:
         df = _yf_download("HKD=X", period="5d", interval="1d")
@@ -221,7 +305,7 @@ def get_usd_hkd_latest() -> float:
     return rate
 
 
-# ─── Source 2: AKShare fx_spot_quote (live fallback) ───
+# ─── Source 3: AKShare fx_spot_quote (live fallback) ───
 
 
 def _akshare_fx_spot() -> float | None:
@@ -264,20 +348,10 @@ def _akshare_fx_spot() -> float | None:
 # ─── Public API ───
 
 
-def _check_cache_today_or_yesterday(today: date) -> float | None:
-    for d in [today, today - timedelta(days=1)]:
-        cached = get_fx_cached(d.isoformat())
-        if cached is not None:
-            logger.debug("FX from cache (%s): %.5f", d, cached)
-            return cached
-    return None
-
-
 def get_fx_latest() -> float:
     """Get the latest CNH-per-HKD rate.
 
-    Priority: SQLite cache (instant) → network fetch (slow, only if stale).
-    The rate moves <0.1% per day, so a cached value from today or yesterday is fine.
+    Priority: SQLite spot cache (instant) → real-time network fetch.
 
     Concurrent callers are coalesced via ``_fx_fetch_lock``: only the first
     thread does the network round-trip; subsequent threads re-check the cache
@@ -289,13 +363,13 @@ def get_fx_latest() -> float:
         CNH per 1 HKD (e.g., 0.92)
     """
     today = date.today()
-    cached = _check_cache_today_or_yesterday(today)
+    cached = get_fx_spot_cached("HKDCNH", ttl_seconds=_HKDCNH_CACHE_TTL_SECONDS)
     if cached is not None:
         return cached
 
     with _fx_fetch_lock:
         # Re-check inside the lock — another thread may have populated it.
-        cached = _check_cache_today_or_yesterday(today)
+        cached = get_fx_spot_cached("HKDCNH", ttl_seconds=_HKDCNH_CACHE_TTL_SECONDS)
         if cached is not None:
             return cached
 
@@ -306,15 +380,20 @@ def get_fx_latest() -> float:
         if _fallback_value is not None and time.time() < _fallback_value_until:
             return _fallback_value
 
-        # Cache miss — fetch from network. _yahoo_fx_latest self-skips when
-        # in cooldown so we don't retry every few seconds after a 429.
-        for name, fn in [("Yahoo", _yahoo_fx_latest), ("AKShare", _akshare_fx_spot)]:
+        # Cache miss — fetch from network. Keep Yahoo last so anonymous
+        # yfinance rate limits do not affect the normal live path.
+        for name, fn in [
+            ("Eastmoney", lambda: _eastmoney_fx_latest("HKDCNH")),
+            ("AKShare", _akshare_fx_spot),
+            ("Yahoo", _yahoo_fx_latest),
+        ]:
             try:
                 t0 = time.monotonic()
                 rate = fn()
                 elapsed = time.monotonic() - t0
                 if rate and 0.5 < rate < 1.5:
                     logger.info("FX latest from %s: %.5f (%.1fs)", name, rate, elapsed)
+                    save_fx_spot_rate("HKDCNH", rate)
                     save_fx_rates(pd.DataFrame([{"date": today, "rate": rate}]))
                     return rate
                 logger.debug("FX from %s returned invalid rate: %s (%.1fs)", name, rate, elapsed)
@@ -323,9 +402,7 @@ def get_fx_latest() -> float:
 
         # All live sources failed — fall through to the most recent historical
         # rate. Cache only in memory: persisting the fallback to today's slot
-        # would make tomorrow's _check_cache_today_or_yesterday hit it and skip
-        # the network entirely, freezing the rate for as long as the app keeps
-        # running (the bug we used to ship with).
+        # would pollute the historical series with a fake live quote.
         recent = get_fx_range_cached("2020-01-01", today.isoformat())
         if not recent.empty and "rate" in recent.columns:
             rate = float(recent.iloc[-1]["rate"])
