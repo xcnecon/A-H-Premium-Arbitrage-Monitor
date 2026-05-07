@@ -77,6 +77,32 @@ def init_db() -> None:
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS hkex_entitlements (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_page_date TEXT NOT NULL,
+            source_url       TEXT NOT NULL,
+            sort_order       INTEGER NOT NULL,
+            stock_code       TEXT NOT NULL,
+            stock_short_name TEXT,
+            description      TEXT NOT NULL,
+            ex_date          TEXT,
+            ex_date_raw      TEXT,
+            book_close_raw   TEXT,
+            status           TEXT NOT NULL,
+            is_dividend      INTEGER NOT NULL DEFAULT 0,
+            is_nil_dividend  INTEGER NOT NULL DEFAULT 0,
+            fetched_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_hkex_entitlements_stock
+        ON hkex_entitlements(stock_code)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_hkex_entitlements_ex_date
+        ON hkex_entitlements(ex_date)
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS sync_meta (
             code TEXT NOT NULL, market TEXT NOT NULL,
             last_date TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -307,6 +333,95 @@ def get_fx_spot_cached(symbol: str, ttl_seconds: int) -> float | None:
     if datetime.utcnow() - updated_at > timedelta(seconds=ttl_seconds):
         return None
     return float(row["rate"])
+
+
+# ---------------------------------------------------------------------------
+# HKEX Dividends & Other Entitlements latest table
+# ---------------------------------------------------------------------------
+
+
+def replace_hkex_entitlements(rows: list[dict]) -> int:
+    """Replace the cached HKEX Dividends & Other Entitlements table.
+
+    The cache intentionally stores only the latest HKEX table. Historical
+    snapshots should be added as a separate table if they become necessary.
+    """
+    payload = [
+        (
+            row["source_page_date"],
+            row["source_url"],
+            int(row["sort_order"]),
+            row["stock_code"],
+            row.get("stock_short_name"),
+            row["description"],
+            row.get("ex_date"),
+            row.get("ex_date_raw"),
+            row.get("book_close_raw"),
+            row["status"],
+            1 if row.get("is_dividend") else 0,
+            1 if row.get("is_nil_dividend") else 0,
+        )
+        for row in rows
+    ]
+    with _write_lock:
+        conn = _get_connection()
+        try:
+            conn.execute("BEGIN")
+            conn.execute("DELETE FROM hkex_entitlements")
+            conn.executemany(
+                """
+                INSERT INTO hkex_entitlements (
+                    source_page_date, source_url, sort_order, stock_code,
+                    stock_short_name, description, ex_date, ex_date_raw,
+                    book_close_raw, status, is_dividend, is_nil_dividend
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                payload,
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    logger.info("Replaced HKEX entitlements cache with %d rows", len(payload))
+    return len(payload)
+
+
+def get_hkex_entitlements_count() -> int:
+    """Return the number of rows in the latest HKEX entitlements cache."""
+    conn = _get_connection()
+    cursor = conn.execute("SELECT COUNT(*) AS cnt FROM hkex_entitlements")
+    return int(cursor.fetchone()["cnt"])
+
+
+def get_hkex_entitlements(
+    stock_codes: list[str] | None = None,
+    *,
+    dividends_only: bool = False,
+) -> list[dict]:
+    """Return cached HKEX entitlement rows, optionally filtered by stock code."""
+    conn = _get_connection()
+    where: list[str] = []
+    params: list[str] = []
+    if stock_codes:
+        normalized = [str(code).replace("HK.", "").strip().zfill(5) for code in stock_codes]
+        placeholders = ",".join("?" * len(normalized))
+        where.append(f"stock_code IN ({placeholders})")
+        params.extend(normalized)
+    if dividends_only:
+        where.append("is_dividend = 1 AND is_nil_dividend = 0")
+
+    sql = (
+        "SELECT source_page_date, source_url, sort_order, stock_code, "
+        "stock_short_name, description, ex_date, ex_date_raw, book_close_raw, "
+        "status, is_dividend, is_nil_dividend, fetched_at "
+        "FROM hkex_entitlements"
+    )
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY sort_order"
+    cursor = conn.execute(sql, params)
+    return [dict(row) for row in cursor.fetchall()]
 
 
 # ---------------------------------------------------------------------------

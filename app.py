@@ -37,6 +37,7 @@ from src.storage.db import (
     get_alert_history,
     get_alert_rules,
     get_all_alert_rules_with_state,
+    get_hkex_entitlements,
     get_watchlist,
     init_db,
     remove_pair,
@@ -351,6 +352,23 @@ def _chart_colors(dark: bool) -> dict:
     )
 
 
+def _next_hk_div_ex_date(hk_code: str) -> str | None:
+    """Return next cached HK dividend ex-date if it falls within 30 days."""
+    today = date.today()
+    cutoff = today + timedelta(days=30)
+    candidates: list[date] = []
+    for event in get_hkex_entitlements([hk_code], dividends_only=True):
+        if event.get("status") != "scheduled" or not event.get("ex_date"):
+            continue
+        try:
+            ex_date = datetime.strptime(event["ex_date"], "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            continue
+        if today <= ex_date <= cutoff:
+            candidates.append(ex_date)
+    return min(candidates).isoformat() if candidates else None
+
+
 # ─── Page config ───
 st.set_page_config(
     page_title="A/H Premium Monitor",
@@ -445,6 +463,27 @@ if st.session_state.get("pair_discovery_error"):
         f"Pair discovery failed: {st.session_state['pair_discovery_error']}. "
         "New A/H listings may not be detected today."
     )
+
+# ─── HKEX DOE: cache latest Dividends & Other Entitlements table once per day ───
+if "hkex_entitlements_done" not in st.session_state:
+    try:
+        from src.data.hkex_entitlements import classify as _he_classify
+        from src.data.hkex_entitlements import sync_background as _he_sync_background
+
+        _he_summary = _he_classify()
+        if _he_summary.get("deferred"):
+            import threading as _he_threading
+
+            _he_threading.Thread(
+                target=_he_sync_background,
+                daemon=True,
+                name="bg-hkex-entitlements",
+            ).start()
+            logger.info("Started background HKEX DOE sync")
+        st.session_state.hkex_entitlements_done = True
+    except Exception as e:
+        logger.error("HKEX DOE kickoff failed: %s", e)
+        st.session_state.hkex_entitlements_done = True
 
 TIMEFRAMES = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
 
@@ -1013,8 +1052,16 @@ def _chart_panel(timeframe: str) -> None:
         if is_red_chip(display_hk)
         else ""
     )
+    hk_div_ex_date = _next_hk_div_ex_date(display_hk)
+    hk_div_ex_mark = (
+        f' <span style="color:var(--text-2);font-size:0.85em;font-weight:500;">'
+        f"HK div ex-date: {hk_div_ex_date}</span>"
+        if hk_div_ex_date
+        else ""
+    )
     st.markdown(
-        f"### {stock_name}  `HK.{display_hk}`{red_chip_mark} / `A.{a_code}`{exch_mark}{restricted_mark}",
+        f"### {stock_name}  `HK.{display_hk}`{red_chip_mark} / "
+        f"`A.{a_code}`{exch_mark}{restricted_mark}{hk_div_ex_mark}",
         unsafe_allow_html=True,
     )
 
