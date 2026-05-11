@@ -105,7 +105,7 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 02318,601318,中国平安,active,false,false,hkex,2026-04-16
 02333,601633,长城汽车,active,false,false,hkex,2026-04-16
 02338,000338,潍柴动力,active,false,false,hkex,2026-04-16
-02359,603259,药明康德,active,false,true,hkex,2026-04-16
+02359,603259,药明康德,active,false,false,hkex,2026-04-16
 02402,688339,亿华通,active,false,false,hkex,2026-04-16
 02465,603906,龙蟠科技,active,false,false,hkex,2026-04-16
 02579,300919,中伟股份,active,false,false,hkex,2026-04-16
