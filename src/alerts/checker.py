@@ -8,7 +8,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from src.alerts.telegram import format_premium_alert, send_alert
+from src.alerts.telegram import format_premium_alert, get_last_error, send_alert
 from src.config.settings import (
     ALERT_BUFFER_PCT,
     ALERT_MAX_PER_MINUTE,
@@ -188,8 +188,13 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
             _record_send()
 
         event_type = "fired" if sent else "send_failed"
+        detail = f"threshold={threshold:.1f}"
+        if not sent:
+            last_error = get_last_error()
+            if last_error:
+                detail = f"{detail}; telegram_error={last_error}"
         log_alert_event(
-            rule_id, hk_code, cross_dir, event_type, premium, detail=f"threshold={threshold:.1f}"
+            rule_id, hk_code, cross_dir, event_type, premium, detail=detail
         )
         events.append(
             {

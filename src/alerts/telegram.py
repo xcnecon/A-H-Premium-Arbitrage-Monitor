@@ -14,6 +14,22 @@ from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 logger = logging.getLogger(__name__)
 
 _API_URL = "https://api.telegram.org/bot{token}/sendMessage"
+_LAST_ERROR: str | None = None
+
+
+def _set_last_error(message: str | None) -> None:
+    global _LAST_ERROR
+    _LAST_ERROR = message
+
+
+def get_last_error() -> str | None:
+    """Return the most recent Telegram send failure reason."""
+    return _LAST_ERROR
+
+
+def _clean_error(message: object, limit: int = 240) -> str:
+    text = str(message).replace("\n", " ").strip()
+    return text[:limit]
 
 
 def send_alert(
@@ -35,6 +51,8 @@ def send_alert(
     Returns:
         True if message sent successfully, False otherwise.
     """
+    _set_last_error(None)
+
     # Belt-and-suspenders: test suite leaked real Telegram messages to the user's
     # chat when a test's `patch("src.alerts.telegram.send_alert", ...)` silently
     # failed (the prior test's `patch.dict("sys.modules", ...)` evicted this
@@ -42,15 +60,18 @@ def send_alert(
     # short-circuit under pytest so a future mock regression can't spam chat.
     # PYTEST_CURRENT_TEST is set by pytest for the duration of every test.
     if os.environ.get("PYTEST_CURRENT_TEST"):
+        _set_last_error("suppressed_under_pytest")
         logger.debug("Telegram send_alert suppressed under pytest")
         return False
     token = TELEGRAM_BOT_TOKEN
     if not token:
+        _set_last_error("token_not_configured")
         logger.debug("Telegram token not configured, skipping alert")
         return False
 
     target = chat_id or TELEGRAM_CHAT_ID
     if not target:
+        _set_last_error("chat_id_not_configured")
         logger.debug("Telegram chat_id not configured, skipping alert")
         return False
 
@@ -65,13 +86,26 @@ def send_alert(
     for attempt in range(max_retries):
         try:
             resp = httpx.post(url, json=payload, timeout=10.0)
-            data = resp.json()
+            try:
+                data = resp.json()
+            except ValueError:
+                detail = f"non_json_response status={resp.status_code}: {_clean_error(resp.text)}"
+                _set_last_error(detail)
+                logger.warning(
+                    "Telegram non-JSON response (attempt %s/%s): %s",
+                    attempt + 1,
+                    max_retries,
+                    detail,
+                )
+                data = {}
 
             if data.get("ok"):
                 logger.info("Telegram alert sent to %s", target)
                 return True
 
-            error_code = data.get("error_code", 0)
+            error_code = data.get("error_code", resp.status_code)
+            description = _clean_error(data.get("description") or resp.text)
+            _set_last_error(f"telegram_error {error_code}: {description}")
 
             # Rate limited — respect retry_after
             if error_code == 429:
@@ -82,7 +116,7 @@ def send_alert(
 
             # Permanent failures — do not retry
             if error_code in (400, 401, 403):
-                logger.error("Telegram error %s: %s", error_code, data.get("description"))
+                logger.error("Telegram error %s: %s", error_code, description)
                 return False
 
             logger.warning(
@@ -90,12 +124,14 @@ def send_alert(
                 error_code,
                 attempt + 1,
                 max_retries,
-                data.get("description"),
+                description,
             )
 
         except httpx.TimeoutException:
+            _set_last_error("timeout")
             logger.warning("Telegram timeout (attempt %s/%s)", attempt + 1, max_retries)
         except httpx.HTTPError as exc:
+            _set_last_error(f"http_error: {_clean_error(exc)}")
             logger.warning("Telegram HTTP error (attempt %s/%s): %s", attempt + 1, max_retries, exc)
 
         if attempt < max_retries - 1:

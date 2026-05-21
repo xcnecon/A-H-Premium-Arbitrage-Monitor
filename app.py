@@ -51,6 +51,8 @@ logging.basicConfig(
 )
 # Suppress noisy Futu SDK connect/disconnect logs
 logging.getLogger("futu").setLevel(logging.WARNING)
+# Avoid logging Telegram Bot API URLs, which include the bot token.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
