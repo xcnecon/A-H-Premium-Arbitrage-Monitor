@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from src.alerts import checker
-from src.storage.db import get_alert_history, init_db, upsert_alert_rule
+from src.storage.db import get_alert_history, get_alert_rules, init_db, upsert_alert_rule
 
 
 def test_market_overlap_window_bounds():
@@ -46,6 +46,21 @@ def test_premium_alert_suppressed_outside_market_overlap(monkeypatch):
         for row in get_alert_history(limit=20)
     )
 
+    monkeypatch.setattr(checker, "_is_market_overlap", lambda: True)
+    events = checker.evaluate_alerts(premium_data, fx_rate=0.9)
+
+    assert len(sent) == 1
+    assert events == [
+        {
+            "event": "fired",
+            "hk_code": hk_code,
+            "direction": "cross_up",
+            "premium": 1.0,
+            "threshold": 0.0,
+            "sent": True,
+        }
+    ]
+
 
 def test_premium_alert_sent_inside_market_overlap(monkeypatch):
     init_db()
@@ -83,3 +98,44 @@ def test_premium_alert_sent_inside_market_overlap(monkeypatch):
             "sent": True,
         }
     ]
+
+
+def test_failed_premium_alert_retries_without_consuming_crossing(monkeypatch):
+    init_db()
+    checker._recent_sends.clear()
+    checker._pending_notification_retries.clear()
+
+    hk_code = "TALRT3"
+    upsert_alert_rule(hk_code, 0.0)
+
+    premium_data = {
+        hk_code: {
+            "premium": -1.0,
+            "a_price": 10.0,
+            "h_price": 9.0,
+            "daily_chg": None,
+        }
+    }
+
+    checker.evaluate_alerts(premium_data, fx_rate=0.9)
+
+    monkeypatch.setattr(checker, "_is_market_overlap", lambda: True)
+    monkeypatch.setattr(checker, "send_alert", lambda msg: False)
+    monkeypatch.setattr(checker, "get_last_error", lambda: "timeout")
+
+    premium_data[hk_code]["premium"] = 1.0
+    events = checker.evaluate_alerts(premium_data, fx_rate=0.9)
+
+    assert events[0]["event"] == "send_failed"
+    rule = get_alert_rules(hk_code)[0]
+    assert rule["last_side"] == "below"
+
+    checker._pending_notification_retries[(rule["id"], "cross_up")] = 0.0
+    sent: list[str] = []
+    monkeypatch.setattr(checker, "send_alert", lambda msg: sent.append(msg) or True)
+
+    events = checker.evaluate_alerts(premium_data, fx_rate=0.9)
+
+    assert len(sent) == 1
+    assert events[0]["event"] == "fired"
+    assert get_alert_rules(hk_code)[0]["last_side"] == "above"

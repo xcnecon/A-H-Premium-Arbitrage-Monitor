@@ -25,9 +25,11 @@ from src.storage.db import (
 logger = logging.getLogger(__name__)
 
 _HKT = timezone(timedelta(hours=8))
+_RETRY_AFTER_FAILURE_SECONDS = 60
 
 # Module-level rate limiter: list of timestamps of recent sends
 _recent_sends: list[float] = []
+_pending_notification_retries: dict[tuple[int, str], float] = {}
 
 
 def _is_rate_limited() -> bool:
@@ -43,6 +45,33 @@ def _record_send() -> None:
     _recent_sends.append(time.time())
 
 
+def _retry_deferred(rule_id: int, direction: str) -> bool:
+    retry_after = _pending_notification_retries.get((rule_id, direction), 0.0)
+    return time.time() < retry_after
+
+
+def _defer_retry(rule_id: int, direction: str) -> None:
+    _pending_notification_retries[(rule_id, direction)] = time.time() + _RETRY_AFTER_FAILURE_SECONDS
+
+
+def _clear_retry(rule_id: int, direction: str) -> None:
+    _pending_notification_retries.pop((rule_id, direction), None)
+
+
+def _is_permanent_telegram_failure(last_error: str | None) -> bool:
+    if not last_error:
+        return False
+    permanent_markers = (
+        "telegram_error 400:",
+        "telegram_error 401:",
+        "telegram_error 403:",
+        "token_not_configured",
+        "chat_id_not_configured",
+        "suppressed_under_pytest",
+    )
+    return any(marker in last_error for marker in permanent_markers)
+
+
 def _is_market_overlap(now: datetime | None = None) -> bool:
     """True during the A/H arbitrage overlap window in HKT."""
     now = now or datetime.now(_HKT)
@@ -53,6 +82,16 @@ def _is_market_overlap(now: datetime | None = None) -> bool:
     start = datetime.strptime(MARKET_OVERLAP_START, "%H:%M").time()
     end = datetime.strptime(MARKET_OVERLAP_END, "%H:%M").time()
     return start <= current <= end
+
+
+def _side_for_premium(premium: float, threshold: float, last_side: str | None) -> str:
+    """Return the threshold side, applying hysteresis when a prior side exists."""
+    buf = ALERT_BUFFER_PCT
+    if last_side == "below":
+        return "above" if premium >= threshold + buf else "below"
+    if last_side == "above":
+        return "below" if premium < threshold - buf else "above"
+    return "above" if premium >= threshold else "below"
 
 
 def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]:
@@ -92,18 +131,7 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
         threshold = rule["threshold"]
         last_side = rule.get("last_side")
 
-        # Determine which side of the threshold we are on now,
-        # applying hysteresis buffer to prevent rapid flip-flopping.
-        # If currently "below", must rise to threshold + buffer to cross up.
-        # If currently "above", must drop to threshold - buffer to cross down.
-        buf = ALERT_BUFFER_PCT
-        if last_side == "below":
-            current_side = "above" if premium >= threshold + buf else "below"
-        elif last_side == "above":
-            current_side = "below" if premium < threshold - buf else "above"
-        else:
-            # First evaluation — no buffer, just record side
-            current_side = "above" if premium >= threshold else "below"
+        current_side = _side_for_premium(premium, threshold, last_side)
 
         if last_side is None:
             # First evaluation — record the side without firing
@@ -124,6 +152,37 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
 
         # ── CROSSOVER detected (passed buffer threshold) ──
         cross_dir = "cross_up" if current_side == "above" else "cross_down"
+        prior_premium = rule.get("last_premium")
+        prior_side = (
+            _side_for_premium(prior_premium, threshold, last_side)
+            if prior_premium is not None
+            else last_side
+        )
+        already_pending = prior_side == current_side
+
+        if not _is_market_overlap():
+            update_alert_state(rule_id, last_premium=premium)
+            if prior_side != current_side:
+                logger.info(
+                    "Skipping Telegram alert outside A/H overlap window (%s-%s HKT): %s",
+                    MARKET_OVERLAP_START,
+                    MARKET_OVERLAP_END,
+                    hk_code,
+                )
+                log_alert_event(
+                    rule_id,
+                    hk_code,
+                    cross_dir,
+                    "outside_market_overlap",
+                    premium,
+                    detail=f"threshold={threshold:.1f}",
+                )
+            continue
+
+        if already_pending and _retry_deferred(rule_id, cross_dir):
+            update_alert_state(rule_id, last_premium=premium)
+            continue
+
         logger.info(
             "CROSSOVER: %s premium %.2f%% crossed %.1f%% (%s)",
             hk_code,
@@ -132,28 +191,10 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
             cross_dir,
         )
 
-        # Always update side first so we don't re-fire on the next tick
-        update_alert_state(rule_id, last_side=current_side, last_premium=premium)
-
-        if not _is_market_overlap():
-            logger.info(
-                "Skipping Telegram alert outside A/H overlap window (%s-%s HKT): %s",
-                MARKET_OVERLAP_START,
-                MARKET_OVERLAP_END,
-                hk_code,
-            )
-            log_alert_event(
-                rule_id,
-                hk_code,
-                cross_dir,
-                "outside_market_overlap",
-                premium,
-                detail=f"threshold={threshold:.1f}",
-            )
-            continue
-
         if _is_rate_limited():
             logger.warning("Rate limited, skipping notification for %s", hk_code)
+            update_alert_state(rule_id, last_premium=premium)
+            _defer_retry(rule_id, cross_dir)
             log_alert_event(
                 rule_id,
                 hk_code,
@@ -185,12 +226,21 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
         )
         sent = send_alert(msg)
         if sent:
+            update_alert_state(rule_id, last_side=current_side, last_premium=premium)
             _record_send()
+            _clear_retry(rule_id, cross_dir)
+        else:
+            last_error = get_last_error()
+            if _is_permanent_telegram_failure(last_error):
+                update_alert_state(rule_id, last_side=current_side, last_premium=premium)
+                _clear_retry(rule_id, cross_dir)
+            else:
+                update_alert_state(rule_id, last_premium=premium)
+                _defer_retry(rule_id, cross_dir)
 
         event_type = "fired" if sent else "send_failed"
         detail = f"threshold={threshold:.1f}"
         if not sent:
-            last_error = get_last_error()
             if last_error:
                 detail = f"{detail}; telegram_error={last_error}"
         log_alert_event(
