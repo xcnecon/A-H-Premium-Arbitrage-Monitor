@@ -17,8 +17,10 @@ from src.config.settings import (
 )
 from src.data.ah_mapping import get_a_code, get_pair_name
 from src.storage.db import (
+    clear_alert_pending_retry,
     get_alert_rules,
     log_alert_event,
+    set_alert_pending_retry,
     update_alert_state,
 )
 
@@ -29,7 +31,6 @@ _RETRY_AFTER_FAILURE_SECONDS = 60
 
 # Module-level rate limiter: list of timestamps of recent sends
 _recent_sends: list[float] = []
-_pending_notification_retries: dict[tuple[int, str], float] = {}
 
 
 def _is_rate_limited() -> bool:
@@ -45,17 +46,32 @@ def _record_send() -> None:
     _recent_sends.append(time.time())
 
 
-def _retry_deferred(rule_id: int, direction: str) -> bool:
-    retry_after = _pending_notification_retries.get((rule_id, direction), 0.0)
+def _retry_deferred(rule: dict, direction: str) -> bool:
+    if rule.get("pending_direction") != direction:
+        return False
+    retry_after = float(rule.get("pending_retry_after") or 0.0)
     return time.time() < retry_after
 
 
 def _defer_retry(rule_id: int, direction: str) -> None:
-    _pending_notification_retries[(rule_id, direction)] = time.time() + _RETRY_AFTER_FAILURE_SECONDS
+    set_alert_pending_retry(rule_id, direction, time.time() + _RETRY_AFTER_FAILURE_SECONDS)
 
 
 def _clear_retry(rule_id: int, direction: str) -> None:
-    _pending_notification_retries.pop((rule_id, direction), None)
+    clear_alert_pending_retry(rule_id, direction)
+
+
+def _has_pending_retry(rule: dict, direction: str) -> bool:
+    return rule.get("pending_direction") == direction
+
+
+def _direction_for_side(side: str) -> str:
+    return "cross_up" if side == "above" else "cross_down"
+
+
+def _clear_opposite_retry(rule_id: int, direction: str) -> None:
+    stale_direction = "cross_down" if direction == "cross_up" else "cross_up"
+    _clear_retry(rule_id, stale_direction)
 
 
 def _is_permanent_telegram_failure(last_error: str | None) -> bool:
@@ -68,6 +84,7 @@ def _is_permanent_telegram_failure(last_error: str | None) -> bool:
         "token_not_configured",
         "chat_id_not_configured",
         "suppressed_under_pytest",
+        "proxy_config_error:",
     )
     return any(marker in last_error for marker in permanent_markers)
 
@@ -92,6 +109,85 @@ def _side_for_premium(premium: float, threshold: float, last_side: str | None) -
     if last_side == "above":
         return "below" if premium < threshold - buf else "above"
     return "above" if premium >= threshold else "below"
+
+
+def _send_crossover_notification(
+    rule: dict,
+    data: dict,
+    fx_rate: float,
+    direction: str,
+    *,
+    is_retry: bool = False,
+) -> dict | None:
+    """Send one crossover notification and update retry bookkeeping."""
+    rule_id = rule["id"]
+    hk_code = rule["hk_code"]
+    threshold = rule["threshold"]
+    premium = data["premium"]
+
+    if _is_rate_limited():
+        logger.warning("Rate limited, skipping notification for %s", hk_code)
+        _defer_retry(rule_id, direction)
+        detail = f"threshold={threshold:.1f}"
+        if is_retry:
+            detail = f"{detail}; retry=1"
+        log_alert_event(
+            rule_id,
+            hk_code,
+            direction,
+            "rate_limited",
+            premium,
+            detail=detail,
+        )
+        return None
+
+    name = get_pair_name(hk_code) or hk_code
+    a_code = get_a_code(hk_code) or ""
+    a_price = data.get("a_price", 0)
+    h_price = data.get("h_price", 0)
+    daily_chg = data.get("daily_chg")
+
+    msg = format_premium_alert(
+        name=name,
+        hk_code=hk_code,
+        a_code=a_code,
+        premium_pct=premium,
+        threshold=threshold,
+        direction=direction,
+        a_price=a_price,
+        h_price=h_price,
+        fx_rate=fx_rate,
+        daily_chg=daily_chg,
+    )
+    sent = send_alert(msg)
+    last_error = None
+    if sent:
+        _record_send()
+        _clear_retry(rule_id, direction)
+    else:
+        last_error = get_last_error()
+        if _is_permanent_telegram_failure(last_error):
+            _clear_retry(rule_id, direction)
+        else:
+            _defer_retry(rule_id, direction)
+
+    event_type = "fired" if sent else "send_failed"
+    detail = f"threshold={threshold:.1f}"
+    if is_retry:
+        detail = f"{detail}; retry=1"
+    if not sent and last_error:
+        detail = f"{detail}; telegram_error={last_error}"
+    log_alert_event(
+        rule_id, hk_code, direction, event_type, premium, detail=detail
+    )
+    return {
+        "event": event_type,
+        "hk_code": hk_code,
+        "direction": direction,
+        "premium": premium,
+        "threshold": threshold,
+        "sent": sent,
+    }
 
 
 def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]:
@@ -146,19 +242,32 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
             continue
 
         if current_side == last_side:
-            # Same side — no crossing, just update last_premium
+            retry_dir = _direction_for_side(current_side)
+            if (
+                _has_pending_retry(rule, retry_dir)
+                and not _retry_deferred(rule, retry_dir)
+                and _is_market_overlap()
+            ):
+                event = _send_crossover_notification(
+                    rule, data, fx_rate, retry_dir, is_retry=True
+                )
+                update_alert_state(rule_id, last_premium=premium)
+                if event:
+                    events.append(event)
+                continue
+
+            # Same side — no new crossing, just update last_premium
             update_alert_state(rule_id, last_premium=premium)
             continue
 
         # ── CROSSOVER detected (passed buffer threshold) ──
-        cross_dir = "cross_up" if current_side == "above" else "cross_down"
+        cross_dir = _direction_for_side(current_side)
         prior_premium = rule.get("last_premium")
         prior_side = (
             _side_for_premium(prior_premium, threshold, last_side)
             if prior_premium is not None
             else last_side
         )
-        already_pending = prior_side == current_side
 
         if not _is_market_overlap():
             update_alert_state(rule_id, last_premium=premium)
@@ -179,10 +288,6 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
                 )
             continue
 
-        if already_pending and _retry_deferred(rule_id, cross_dir):
-            update_alert_state(rule_id, last_premium=premium)
-            continue
-
         logger.info(
             "CROSSOVER: %s premium %.2f%% crossed %.1f%% (%s)",
             hk_code,
@@ -191,70 +296,10 @@ def evaluate_alerts(premium_data: dict[str, dict], fx_rate: float) -> list[dict]
             cross_dir,
         )
 
-        if _is_rate_limited():
-            logger.warning("Rate limited, skipping notification for %s", hk_code)
-            update_alert_state(rule_id, last_premium=premium)
-            _defer_retry(rule_id, cross_dir)
-            log_alert_event(
-                rule_id,
-                hk_code,
-                cross_dir,
-                "rate_limited",
-                premium,
-                detail=f"threshold={threshold:.1f}",
-            )
-            continue
-
-        # Send Telegram notification
-        name = get_pair_name(hk_code) or hk_code
-        a_code = get_a_code(hk_code) or ""
-        a_price = data.get("a_price", 0)
-        h_price = data.get("h_price", 0)
-        daily_chg = data.get("daily_chg")
-
-        msg = format_premium_alert(
-            name=name,
-            hk_code=hk_code,
-            a_code=a_code,
-            premium_pct=premium,
-            threshold=threshold,
-            direction=cross_dir,
-            a_price=a_price,
-            h_price=h_price,
-            fx_rate=fx_rate,
-            daily_chg=daily_chg,
-        )
-        sent = send_alert(msg)
-        if sent:
-            update_alert_state(rule_id, last_side=current_side, last_premium=premium)
-            _record_send()
-            _clear_retry(rule_id, cross_dir)
-        else:
-            last_error = get_last_error()
-            if _is_permanent_telegram_failure(last_error):
-                update_alert_state(rule_id, last_side=current_side, last_premium=premium)
-                _clear_retry(rule_id, cross_dir)
-            else:
-                update_alert_state(rule_id, last_premium=premium)
-                _defer_retry(rule_id, cross_dir)
-
-        event_type = "fired" if sent else "send_failed"
-        detail = f"threshold={threshold:.1f}"
-        if not sent:
-            if last_error:
-                detail = f"{detail}; telegram_error={last_error}"
-        log_alert_event(
-            rule_id, hk_code, cross_dir, event_type, premium, detail=detail
-        )
-        events.append(
-            {
-                "event": event_type,
-                "hk_code": hk_code,
-                "direction": cross_dir,
-                "premium": premium,
-                "threshold": threshold,
-                "sent": sent,
-            }
-        )
+        _clear_opposite_retry(rule_id, cross_dir)
+        event = _send_crossover_notification(rule, data, fx_rate, cross_dir)
+        update_alert_state(rule_id, last_side=current_side, last_premium=premium)
+        if event:
+            events.append(event)
 
     return events

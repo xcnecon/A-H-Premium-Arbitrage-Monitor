@@ -52,6 +52,10 @@ Copy `.env.example` to `.env` and edit as needed:
 # Required for Telegram alerts (leave blank to disable)
 TELEGRAM_BOT_TOKEN=your_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
+# Optional dedicated proxy/timeout for Telegram Bot API delivery.
+# If unset, Telegram falls back only to HTTP/HTTPS YAHOO_PROXY_URL.
+# TELEGRAM_PROXY_URL=http://user:pass@host:port
+# TELEGRAM_TIMEOUT=15
 
 # Futu OpenD gateway (defaults shown)
 OPEND_HOST=127.0.0.1
@@ -197,6 +201,9 @@ pip install -r requirements.txt
 # Telegram 预警（留空则禁用）
 TELEGRAM_BOT_TOKEN=your_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
+# Telegram Bot API 专用代理/超时（可选；未设置时仅回落到 HTTP/HTTPS YAHOO_PROXY_URL）
+# TELEGRAM_PROXY_URL=http://user:pass@host:port
+# TELEGRAM_TIMEOUT=15
 
 # 富途 OpenD 网关（以下为默认值）
 OPEND_HOST=127.0.0.1

@@ -7,12 +7,35 @@ Loads user-configurable values and secrets from environment variables
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+
+def _optional_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _http_proxy_url(proxy_url: str | None) -> str | None:
+    if not proxy_url:
+        return None
+    scheme = urlparse(proxy_url).scheme.lower()
+    return proxy_url if scheme in ("http", "https") else None
+
+
+def _telegram_proxy_url(explicit_proxy: str | None, fallback_proxy: str | None) -> str | None:
+    if explicit_proxy:
+        return explicit_proxy
+    return _http_proxy_url(fallback_proxy)
+
 
 # ─── Futu OpenD gateway connection (user-configurable) ───
 OPEND_HOST: str = os.getenv("OPEND_HOST", "127.0.0.1")
@@ -46,14 +69,22 @@ MAX_ALERTS_PER_STOCK: int = 3  # max crossover thresholds per stock
 ALERT_BUFFER_PCT: float = float(os.getenv("ALERT_BUFFER_PCT", "0.1"))  # hysteresis buffer (pp)
 
 # ─── China proxy for A-share APIs (user-configurable) ───
-_proxy_url: str | None = os.getenv("A_SHARE_PROXY_URL")
+_proxy_url: str | None = _optional_env("A_SHARE_PROXY_URL")
 A_SHARE_PROXY: dict | None = {"http": _proxy_url, "https": _proxy_url} if _proxy_url else None
 
 # ─── Yahoo Finance / general HTTPS proxy (user-configurable) ───
 # For users in mainland China where Yahoo is blocked, or for routing through a specific proxy.
 # Set YAHOO_PROXY_URL in .env (e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080")
-_yahoo_proxy: str | None = os.getenv("YAHOO_PROXY_URL")
+_yahoo_proxy: str | None = _optional_env("YAHOO_PROXY_URL")
 YAHOO_PROXY: dict | None = {"http": _yahoo_proxy, "https": _yahoo_proxy} if _yahoo_proxy else None
+
+# Telegram Bot API delivery can use its own proxy. If unset, inherit only
+# HTTP(S) Yahoo proxies; SOCKS fallback would require optional httpx extras.
+TELEGRAM_PROXY_URL: str | None = _telegram_proxy_url(
+    _optional_env("TELEGRAM_PROXY_URL"),
+    _yahoo_proxy,
+)
+TELEGRAM_TIMEOUT: float = float(os.getenv("TELEGRAM_TIMEOUT", "15"))
 
 # Network timeouts for external APIs (seconds)
 YAHOO_TIMEOUT: float = float(os.getenv("YAHOO_TIMEOUT", "10"))

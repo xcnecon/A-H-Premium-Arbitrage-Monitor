@@ -140,8 +140,20 @@ def init_db() -> None:
             rule_id         INTEGER PRIMARY KEY REFERENCES alert_rules(id),
             last_side       TEXT,
             last_premium    REAL,
+            pending_direction TEXT,
+            pending_retry_after REAL,
             updated_at      TEXT DEFAULT CURRENT_TIMESTAMP
         )
+    """)
+    cursor = conn.execute("PRAGMA table_info(alert_state)")
+    alert_state_cols = {row[1] for row in cursor.fetchall()}
+    if "pending_direction" not in alert_state_cols:
+        conn.execute("ALTER TABLE alert_state ADD COLUMN pending_direction TEXT")
+    if "pending_retry_after" not in alert_state_cols:
+        conn.execute("ALTER TABLE alert_state ADD COLUMN pending_retry_after REAL")
+    conn.execute("""
+        INSERT OR IGNORE INTO alert_state (rule_id)
+        SELECT id FROM alert_rules
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS alert_history (
@@ -496,7 +508,8 @@ def get_alert_rules(hk_code: str | None = None) -> list[dict]:
     conn = _get_connection()
     if hk_code:
         cursor = conn.execute(
-            """SELECT r.*, s.last_side, s.last_premium
+            """SELECT r.*, s.last_side, s.last_premium,
+                      s.pending_direction, s.pending_retry_after
                FROM alert_rules r
                LEFT JOIN alert_state s ON r.id = s.rule_id
                WHERE r.hk_code=? AND r.enabled=1
@@ -505,7 +518,8 @@ def get_alert_rules(hk_code: str | None = None) -> list[dict]:
         )
     else:
         cursor = conn.execute(
-            """SELECT r.*, s.last_side, s.last_premium
+            """SELECT r.*, s.last_side, s.last_premium,
+                      s.pending_direction, s.pending_retry_after
                FROM alert_rules r
                LEFT JOIN alert_state s ON r.id = s.rule_id
                WHERE r.enabled=1
@@ -514,11 +528,51 @@ def get_alert_rules(hk_code: str | None = None) -> list[dict]:
     return [dict(row) for row in cursor.fetchall()]
 
 
+def set_alert_pending_retry(rule_id: int, direction: str, retry_after: float) -> None:
+    """Persist a deferred alert notification retry."""
+    conn = _get_connection()
+    conn.execute(
+        """INSERT INTO alert_state (
+               rule_id, pending_direction, pending_retry_after, updated_at
+           )
+           VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(rule_id) DO UPDATE SET
+               pending_direction=excluded.pending_direction,
+               pending_retry_after=excluded.pending_retry_after,
+               updated_at=CURRENT_TIMESTAMP""",
+        (rule_id, direction, retry_after),
+    )
+    conn.commit()
+
+
+def clear_alert_pending_retry(rule_id: int, direction: str | None = None) -> None:
+    """Clear a deferred alert notification retry."""
+    conn = _get_connection()
+    if direction is None:
+        conn.execute(
+            """UPDATE alert_state
+               SET pending_direction=NULL, pending_retry_after=NULL,
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE rule_id=?""",
+            (rule_id,),
+        )
+    else:
+        conn.execute(
+            """UPDATE alert_state
+               SET pending_direction=NULL, pending_retry_after=NULL,
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE rule_id=? AND pending_direction=?""",
+            (rule_id, direction),
+        )
+    conn.commit()
+
+
 def update_alert_state(
     rule_id: int, last_side: str | None = None, last_premium: float | None = None
 ) -> None:
     """Update alert crossover state (last_side and/or last_premium)."""
     conn = _get_connection()
+    conn.execute("INSERT OR IGNORE INTO alert_state (rule_id) VALUES (?)", (rule_id,))
     sets = ["updated_at=CURRENT_TIMESTAMP"]
     vals: list = []
     if last_side is not None:
@@ -567,7 +621,8 @@ def get_all_alert_rules_with_state() -> list[dict]:
     """Get ALL alert rules (enabled or not) with their current crossover state."""
     conn = _get_connection()
     cursor = conn.execute(
-        """SELECT r.*, s.last_side, s.last_premium
+        """SELECT r.*, s.last_side, s.last_premium,
+                  s.pending_direction, s.pending_retry_after
            FROM alert_rules r
            LEFT JOIN alert_state s ON r.id = s.rule_id
            ORDER BY r.hk_code, r.threshold"""

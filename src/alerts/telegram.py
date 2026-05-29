@@ -9,7 +9,12 @@ import time
 
 import httpx
 
-from src.config.settings import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from src.config.settings import (
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID,
+    TELEGRAM_PROXY_URL,
+    TELEGRAM_TIMEOUT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +35,13 @@ def get_last_error() -> str | None:
 def _clean_error(message: object, limit: int = 240) -> str:
     text = str(message).replace("\n", " ").strip()
     return text[:limit]
+
+
+def _normalise_proxy_url(proxy_url: str | None) -> str | None:
+    if proxy_url is None:
+        return None
+    proxy_url = str(proxy_url).strip()
+    return proxy_url or None
 
 
 def send_alert(
@@ -82,10 +94,16 @@ def send_alert(
         "parse_mode": parse_mode,
         "disable_notification": disable_notification,
     }
+    proxy_url = _normalise_proxy_url(TELEGRAM_PROXY_URL)
 
     for attempt in range(max_retries):
         try:
-            resp = httpx.post(url, json=payload, timeout=10.0)
+            resp = httpx.post(
+                url,
+                json=payload,
+                timeout=TELEGRAM_TIMEOUT,
+                proxy=proxy_url,
+            )
             try:
                 data = resp.json()
             except ValueError:
@@ -133,6 +151,10 @@ def send_alert(
         except httpx.HTTPError as exc:
             _set_last_error(f"http_error: {_clean_error(exc)}")
             logger.warning("Telegram HTTP error (attempt %s/%s): %s", attempt + 1, max_retries, exc)
+        except (ImportError, ValueError) as exc:
+            _set_last_error(f"proxy_config_error: {_clean_error(exc)}")
+            logger.error("Telegram proxy configuration error: %s", exc)
+            return False
 
         if attempt < max_retries - 1:
             time.sleep(2**attempt)
