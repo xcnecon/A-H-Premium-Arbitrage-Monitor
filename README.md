@@ -11,6 +11,8 @@ Real-time monitor for A-share / H-share premium arbitrage opportunities across a
 - **Historical charts** -- interactive line charts (Plotly) for A-share price, H-share price, and H/A premium ratio
 - **Premium screener** -- scan every active A/H pair at once to find the widest dislocations
 - **Telegram alerts** -- configurable threshold notifications during the A/H overlap session (9:30--15:00 HKT)
+- **Dividend ex-date flag** -- syncs the HKEX "Dividends & Other Entitlements" table once per day; the chart highlights H-share ex-dates falling within the next 30 days
+- **Special-event alerts** -- detects single-side trading halts (one leg not trading for 2+ sessions while the other trades) and sends Telegram notices on both onset and resolution
 - **FX rate tracking** -- live HKD/CNH and USD/HKD rates from Eastmoney with SQLite caching and fallbacks
 - **Configurable watchlist** -- add/remove pairs from the sidebar; persisted in local SQLite
 
@@ -24,8 +26,8 @@ The project uses a hybrid data architecture because Futu OpenAPI does not serve 
 | A-share K-line & real-time | AKShare + Sina/Tencent HTTP | Tencent K-line source; Sina real-time; A-share trading calendar skips mainland holidays |
 | FX rates (HKD/CNH, USD/HKD) | Eastmoney + AKShare + Yahoo Finance fallback | HKD/CNH uses 60-second SQLite spot cache for intraday updates; USD/HKD uses 1-hour SQLite spot cache |
 | Dashboard | Streamlit + Plotly | Fragment-based live updates (`run_every=5s`) |
-| Storage | SQLite (`~/.ah-arb/data.db`) | Watchlist, FX cache, K-line cache, sync metadata |
-| Scheduling | APScheduler | Background sync jobs for historical data |
+| Storage | SQLite (`~/.ah-arb/data.db`) | Watchlist, FX cache, K-line cache, HKEX entitlements, special-event state, sync metadata |
+| Scheduling | Background daemon threads at app startup | Historical K-line sync, daily HKEX pair-discovery scan, daily entitlements refresh |
 
 ## Prerequisites
 
@@ -66,6 +68,10 @@ OPEND_PORT=11111
 
 # Proxy for A-share APIs (Sina/Tencent) -- needed outside mainland China
 # A_SHARE_PROXY_URL=http://user:pass@host:port
+
+# Proxy for the Yahoo Finance FX fallback (also inherited by Telegram when
+# TELEGRAM_PROXY_URL is unset) -- needed inside mainland China
+# YAHOO_PROXY_URL=http://127.0.0.1:7890
 
 # Thread pool sizes for historical sync
 # SYNC_A_WORKERS=10
@@ -116,12 +122,15 @@ ah-arb/
 │   │   ├── ah_mapping.py       # CSV-backed HK <-> A code lookup + add/delisted helpers
 │   │   ├── pair_discovery.py   # Daily HKEX widget scan + Telegram alerts
 │   │   ├── futu_client.py      # H-share K-line (Futu, AKShare fallback)
+│   │   ├── futu_ctx.py         # Shared singleton Futu OpenQuoteContext
 │   │   ├── akshare_client.py   # A-share K-line (Tencent source)
 │   │   ├── fx_client.py        # FX rates (Eastmoney, AKShare, Yahoo fallback, SQLite cache)
+│   │   ├── hkex_entitlements.py # Daily HKEX Dividends & Other Entitlements table sync
 │   │   ├── realtime.py         # Live snapshots (Futu snapshot, Sina/Tencent HTTP)
 │   │   └── sync.py             # K-line sync orchestration
 │   ├── alerts/
 │   │   ├── checker.py          # Alert condition evaluation + rate limiting
+│   │   ├── special_events.py   # Single-side trading-halt detection + notifications
 │   │   └── telegram.py         # Telegram bot notification delivery
 │   ├── calc/
 │   │   ├── premium.py          # Ratio OHLCV computation, premium %
@@ -129,10 +138,7 @@ ah-arb/
 │   └── storage/
 │       ├── db.py               # SQLite: watchlist CRUD, FX cache, sync/scan metadata
 │       └── kline_cache.py      # K-line cache read/write for daily bars
-└── tests/
-    ├── test_mapping.py
-    ├── test_premium.py
-    └── test_db.py
+└── tests/                      # pytest suite covering the modules above
 ```
 
 ## Development
@@ -152,7 +158,7 @@ The project runs on both Windows and macOS. All file paths use `pathlib.Path` fo
 
 # A/H 溢价套利监控
 
-实时监控全部 A+H 双重上市股票的 A/H 溢价套利机会。追踪沪深 A 股与香港 H 股之间的价差，提供交互式图表、全市场筛选器和 Telegram 预警。
+实时监控全部 A+H 双重上市股票的 A/H 溢价套利机会。追踪沪深 A 股与香港 H 股之间的价差，提供交互式图表、全市场筛选器和 Telegram 预警。配对列表自动扩充——每日后台任务扫描港交所新上市的 A+H 股。
 
 ## 功能
 
@@ -160,6 +166,8 @@ The project runs on both Windows and macOS. All file paths use `pathlib.Path` fo
 - **历史走势图** -- 交互式折线图（Plotly），展示 A 股价格、H 股价格及 H/A 溢价比值
 - **溢价筛选器** -- 一键扫描全部 A/H 股，找出偏离最大的标的
 - **Telegram 预警** -- 仅在 A/H 共同套利时段（HKT 9:30--15:00）推送阈值突破通知
+- **除息日提示** -- 每日同步港交所"股息及其他权益"表，图表中标注 30 天内的 H 股除息日
+- **特殊事件预警** -- 检测单边停牌（一边连续 2 个及以上交易日无成交而另一边正常交易），事件发生与恢复时均推送 Telegram 通知
 - **汇率追踪** -- 东方财富实时 HKD/CNH 与 USD/HKD 汇率，SQLite 缓存 + 多源备用
 - **自选股管理** -- 侧边栏添加/删除，本地 SQLite 持久化
 
@@ -173,8 +181,8 @@ The project runs on both Windows and macOS. All file paths use `pathlib.Path` fo
 | A 股行情（历史 + 实时） | AKShare + 新浪/腾讯 HTTP | 腾讯历史 K 线；新浪实时快照；A 股交易日历跳过内地假期 |
 | 汇率（HKD/CNH、USD/HKD） | 东方财富 + AKShare + Yahoo Finance 兜底 | HKD/CNH 使用 60 秒 SQLite spot 缓存保留盘中更新；USD/HKD 使用 1 小时 SQLite spot 缓存 |
 | 前端 | Streamlit + Plotly | Fragment 局部刷新（`run_every=5s`） |
-| 存储 | SQLite（`~/.ah-arb/data.db`） | 自选股、汇率缓存、K 线缓存、同步元数据 |
-| 调度 | APScheduler | 后台历史数据同步任务 |
+| 存储 | SQLite（`~/.ah-arb/data.db`） | 自选股、汇率缓存、K 线缓存、港交所权益表、特殊事件状态、同步元数据 |
+| 调度 | 启动时后台守护线程 | 历史 K 线同步、每日港交所新配对扫描、每日权益表刷新 |
 
 ## 前置条件
 
@@ -214,6 +222,9 @@ OPEND_PORT=11111
 
 # A 股 API 代理（大陆以外地区需要）
 # A_SHARE_PROXY_URL=http://user:pass@host:port
+
+# Yahoo Finance 汇率兜底代理（未设置 TELEGRAM_PROXY_URL 时 Telegram 也会继承）——大陆地区需要
+# YAHOO_PROXY_URL=http://127.0.0.1:7890
 
 # 历史同步线程池大小
 # SYNC_A_WORKERS=10
