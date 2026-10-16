@@ -16,6 +16,7 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 00470,300450,先导智能,active,false,false,hkex,2026-04-16
 00501,603501,豪威集团,active,false,false,hkex,2026-04-16
 00525,601333,广深铁路,active,false,false,hkex,2026-04-16
+00537,688337,普源精电,active,false,false,eastmoney+tencent,2026-10-16
 00548,600548,深高速,active,false,false,hkex,2026-04-16
 00553,600775,南京熊猫,active,false,false,hkex,2026-04-16
 00564,601717,郑煤机,active,false,false,hkex,2026-04-16
@@ -23,6 +24,7 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 00588,601588,北辰实业,active,false,false,hkex,2026-04-16
 00598,601598,中国外运,active,false,false,hkex,2026-04-16
 00638,300638,广和通,active,false,false,hkex,2026-04-16
+00668,300866,安克创新,active,false,false,eastmoney+tencent,2026-10-16
 00670,600115,中国东航,active,false,false,hkex,2026-04-16
 00699,600699,均胜电子,active,false,false,hkex,2026-04-16
 00719,000756,新华制药,active,false,false,hkex,2026-04-16
@@ -52,12 +54,14 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 01065,600874,创业环保,active,false,false,hkex,2026-04-16
 01071,600027,华电国际,active,false,false,hkex,2026-04-16
 01072,600875,东方电气,active,false,false,hkex,2026-04-16
+01081,002487,大金重工,active,false,false,eastmoney+tencent,2026-10-16
 01088,601088,中国神华,active,false,false,hkex,2026-04-16
 01108,600876,凯盛新能,active,false,false,hkex,2026-04-16
 01138,600026,中远海能,active,false,true,hkex,2026-04-16
 01157,000157,中联重科,active,false,false,hkex,2026-04-16
 01171,600188,兖矿能源,active,false,false,hkex,2026-04-16
 01186,601186,中国铁建,active,false,false,hkex,2026-04-16
+01187,301087,可孚医疗,active,false,false,eastmoney+tencent,2026-10-16
 01211,002594,比亚迪,active,false,false,hkex,2026-04-16
 01276,600276,恒瑞医药,active,false,false,hkex,2026-04-16
 01288,601288,农业银行,active,false,false,hkex,2026-04-16
@@ -68,6 +72,7 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 01347,688347,华虹公司,active,true,false,manual,2026-04-16
 01349,688505,复旦张江,active,false,false,hkex,2026-04-16
 01375,601375,中原证券,active,false,false,hkex,2026-04-16
+01377,301377,鼎泰高科,active,false,false,eastmoney+tencent,2026-10-16
 01385,688385,复旦微电,active,false,false,hkex,2026-04-16
 01398,601398,工商银行,active,false,false,hkex,2026-04-16
 01456,601456,国联证券,active,false,false,hkex,2026-04-16
@@ -76,6 +81,7 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 01618,601618,中国中冶,active,false,false,hkex,2026-04-16
 01635,600635,大众公用,active,false,false,hkex,2026-04-16
 01658,601658,邮储银行,active,false,false,hkex,2026-04-16
+01688,002600,领益智造,active,false,false,eastmoney+tencent,2026-10-16
 01766,601766,中国中车,active,false,true,hkex,2026-04-16
 01772,002460,赣锋锂业,active,false,false,hkex,2026-04-16
 01776,000776,广发证券,active,false,false,hkex,2026-04-16
@@ -101,6 +107,8 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 02208,002202,金风科技,active,false,false,hkex,2026-04-16
 02218,605198,安德利,active,false,false,hkex,2026-04-16
 02238,601238,广汽集团,active,false,false,hkex,2026-04-16
+02245,001246,力勤资源,active,false,false,eastmoney+tencent,2026-10-16
+02249,688249,晶合集成,active,false,false,eastmoney+tencent,2026-10-16
 02315,688796,百奥赛图,active,false,false,hkex,2026-04-16
 02318,601318,中国平安,active,false,false,hkex,2026-04-16
 02333,601633,长城汽车,active,false,false,hkex,2026-04-16
@@ -108,6 +116,9 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 02359,603259,药明康德,active,false,false,hkex,2026-04-16
 02402,688339,亿华通,active,false,false,hkex,2026-04-16
 02465,603906,龙蟠科技,active,false,false,hkex,2026-04-16
+02475,002475,立讯精密,active,false,false,eastmoney+tencent,2026-10-16
+02476,300476,胜宏科技,active,false,false,eastmoney+tencent,2026-10-16
+02493,688062,迈威生物-U,active,false,false,eastmoney+tencent,2026-10-16
 02579,300919,中伟股份,active,false,false,hkex,2026-04-16
 02600,601600,中国铝业,active,false,false,hkex,2026-04-16
 02601,601601,中国太保,active,false,false,hkex,2026-04-16
@@ -116,6 +127,7 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 02611,601211,国泰海通,active,false,false,hkex,2026-04-16
 02628,601628,中国人寿,active,false,false,hkex,2026-04-16
 02631,688234,天岳先进,active,false,false,hkex,2026-04-16
+02636,688036,传音控股,active,false,false,eastmoney+tencent,2026-10-16
 02648,603345,安井食品,active,false,false,hkex,2026-04-16
 02676,688052,纳芯微,active,false,false,hkex,2026-04-16
 02691,603093,南华期货股份,active,false,false,hkex,2026-04-16
@@ -131,15 +143,21 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 02883,601808,中海油服,active,false,false,hkex,2026-04-16
 02899,601899,紫金矿业,active,false,false,hkex,2026-04-16
 03200,301200,大族数控,active,false,false,hkex,2026-04-16
+03223,300223,君正股份,active,false,false,eastmoney+tencent,2026-10-16
+03228,603228,景旺电子,active,false,false,eastmoney+tencent,2026-10-16
 03268,002881,美格智能,active,false,false,hkex,2026-04-16
 03288,603288,海天味业,active,false,false,hkex,2026-04-16
+03296,603296,华勤技术,active,false,false,eastmoney+tencent,2026-10-16
+03308,300308,中际旭创,active,false,false,eastmoney+tencent,2026-10-16
 03328,601328,交通银行,active,false,false,hkex,2026-04-16
 03347,300347,泰格医药,active,false,false,hkex,2026-04-16
 03369,601326,秦港股份,active,false,false,hkex,2026-04-16
 03606,600660,福耀玻璃,active,false,false,hkex,2026-04-16
 03618,601077,渝农商行,active,false,false,hkex,2026-04-16
+03661,300661,圣邦股份,active,false,false,eastmoney+tencent,2026-10-16
 03678,001236,弘业期货,active,false,false,hkex,2026-04-16
 03750,300750,宁德时代,active,false,false,hkex,2026-04-16
+03757,300757,罗博特科,active,false,false,eastmoney+tencent,2026-10-16
 03759,300759,康龙化成,active,false,false,hkex,2026-04-16
 03866,002948,青岛银行,active,false,false,hkex,2026-04-16
 03898,688187,时代电气,active,false,false,hkex,2026-04-16
@@ -154,6 +172,7 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 06030,600030,中信证券,active,false,false,hkex,2026-04-16
 06031,600031,三一重工,active,false,false,hkex,2026-04-16
 06066,601066,中信建投,active,false,false,hkex,2026-04-16
+06067,300568,星源材质,active,false,false,eastmoney+tencent,2026-10-16
 06099,600999,招商证券,active,false,false,hkex,2026-04-16
 06127,603127,昭衍新药,active,false,false,hkex,2026-04-16
 06160,688235,百济神州,active,true,false,manual,2026-04-16
@@ -167,6 +186,8 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 06680,300748,金力永磁,active,false,false,hkex,2026-04-16
 06690,600690,海尔智家,active,false,false,hkex,2026-04-16
 06693,600988,赤峰黄金,active,false,false,hkex,2026-04-16
+06727,688031,星环科技-U,active,false,false,eastmoney+tencent,2026-10-16
+06745,601678,滨化股份,active,false,false,eastmoney+tencent,2026-10-16
 06806,000166,申万宏源,active,false,false,hkex,2026-04-16
 06809,688008,澜起科技,active,false,false,hkex,2026-04-16
 06818,601818,光大银行,active,false,false,hkex,2026-04-16
@@ -177,10 +198,14 @@ hk_code,a_code,name,status,is_red_chip,is_restricted,source,first_seen
 06881,601881,中国银河,active,false,false,hkex,2026-04-16
 06886,601688,华泰证券,active,false,false,hkex,2026-04-16
 06936,002352,顺丰控股,active,false,false,hkex,2026-04-16
+06951,300408,三环集团,active,false,false,eastmoney+tencent,2026-10-16
+09607,603650,彤程新材,active,false,false,eastmoney+tencent,2026-10-16
 09611,603341,龙旗科技,active,false,false,hkex,2026-04-16
+09630,688630,芯碁微装,active,false,false,eastmoney+tencent,2026-10-16
 09696,002466,天齐锂业,active,false,false,hkex,2026-04-16
 09927,601127,赛力斯,active,false,false,hkex,2026-04-16
 09969,688428,诺诚健华,active,false,false,hkex,2026-04-16
+09976,301308,江波龙,active,false,false,eastmoney+tencent,2026-10-16
 09980,605499,东鹏饮料,active,false,false,hkex,2026-04-16
 09981,002130,沃尔核材,active,false,false,hkex,2026-04-16
 09989,002399,海普瑞,active,false,false,hkex,2026-04-16

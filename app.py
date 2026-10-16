@@ -31,6 +31,8 @@ from src.data.realtime import (
     get_h_snapshots_batch,
 )
 from src.data.sync import sync_all
+from src.data.short_eligibility import get_short_eligibility
+from src.data.option_info import get_option_info
 from src.storage.db import (
     add_pair,
     delete_alert_rule,
@@ -44,6 +46,13 @@ from src.storage.db import (
     upsert_alert_rule,
 )
 from src.storage.kline_cache import get_premium_history, load_kline
+
+from src.ui.i18n import translate
+
+
+def _t(text: str) -> str:
+    return translate(text, st.session_state.get("language", "en"))
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -372,8 +381,25 @@ def _next_hk_div_ex_date(hk_code: str) -> str | None:
 
 
 # ─── Page config ───
+# Keep language in links so selecting a stock does not reset the preference.
+_query_language = st.query_params.get("lang")
+if "language" not in st.session_state:
+    st.session_state.language = _query_language if _query_language in ("en", "zh") else "en"
+
+
+def _on_language_change():
+    st.query_params["lang"] = st.session_state.language
+    st.session_state.pop("active_tab", None)
+
+
+with st.sidebar:
+    st.selectbox("Language / 语言", ["en", "zh"],
+                 format_func=lambda value: "English" if value == "en" else "简体中文",
+                 key="language", on_change=_on_language_change)
+
+
 st.set_page_config(
-    page_title="A/H Premium Monitor",
+    page_title=_t("A/H Premium Monitor"),
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -397,7 +423,7 @@ _qp_sel = st.query_params.get("sel")
 if _qp_sel:
     st.session_state.selected_hk = _qp_sel
     st.session_state.ticker_select = None
-    st.session_state.active_tab = "Chart"
+    st.session_state.active_tab = _t("Chart")
     st.session_state["_cache_key"] = None
     del st.query_params["sel"]
 _qp_del = st.query_params.get("del")
@@ -407,36 +433,37 @@ if _qp_del:
         st.session_state.selected_hk = ""
     del st.query_params["del"]
 
-# ─── Startup sync: download/update historical K-lines (once per session) ───
+# Initial backfill must never block the dashboard. The process-wide worker
+# lock also prevents a browser refresh or another tab from duplicating work.
+from src.data.sync import get_sync_status, sync_background
+
 if "sync_done" not in st.session_state:
-    try:
-        with st.spinner("Syncing market data..."):
-            summary = sync_all()
-        deferred = summary.get("today_deferred", 0) + summary.get("gap_deferred", 0)
-        if deferred:
-            # Gap-fill and/or today missing — sync_all returned instantly.
-            # Do the real work in a background thread so the dashboard loads now.
-            import threading
-            from src.data.sync import sync_background
+    import threading
 
-            threading.Thread(
-                target=sync_background, daemon=True, name="bg-sync"
-            ).start()
-            logger.info("Deferred %d pairs to background sync", deferred)
-        elif summary.get("history_backfill", 0) > 0:
-            # First-time full downloads — sync_all already did them (blocking).
-            logger.info("Full sync complete: %s", summary)
-        st.session_state.sync_done = True
-        st.session_state.sync_ok = True
-        logger.info("Sync complete: %s", summary)
-    except Exception as e:
-        logger.error("Sync failed: %s", e)
-        st.session_state.sync_done = True
-        st.session_state.sync_ok = False
-        st.session_state["sync_error"] = str(e)
+    threading.Thread(target=sync_background, daemon=True, name="bg-sync").start()
+    st.session_state.sync_done = True
 
-if st.session_state.get("sync_error"):
-    st.warning(f"Data sync failed: {st.session_state['sync_error']}. Showing cached data.")
+
+@st.fragment(run_every=timedelta(seconds=5))
+def _sync_status_panel():
+    status = get_sync_status()
+    if status["state"] == "running":
+        message = _t(status.get("message", "正在同步行情"))
+        total = status.get("total", 0)
+        current = status.get("current", 0)
+        if total:
+            st.progress(min(current / total, 1.0), text=f"后台同步：{message} ({current}/{total})")
+        else:
+            st.caption(f"后台同步：{message}。可先查看图表和筛选器。")
+    elif status["state"] == "failed":
+        st.warning(f"后台行情同步失败：{status.get('error')}。已有缓存仍可查看。")
+    elif status["state"] == "complete" and status.get("errors"):
+        st.warning(f"后台同步已结束，{len(status['errors'])} 项未成功，已有行情仍可查看。")
+    elif status["state"] == "complete":
+        st.caption("后台行情同步已完成。")
+
+
+_sync_status_panel()
 
 # ─── Pair discovery: background scan for newly-listed A/H pairs (once per day) ───
 if "pair_discovery_done" not in st.session_state:
@@ -462,8 +489,7 @@ if "pair_discovery_done" not in st.session_state:
 
 if st.session_state.get("pair_discovery_error"):
     st.warning(
-        f"Pair discovery failed: {st.session_state['pair_discovery_error']}. "
-        "New A/H listings may not be detected today."
+        _t("Pair discovery failed: {error}. New A/H listings may not be detected today.").format(error=st.session_state["pair_discovery_error"])
     )
 
 # ─── HKEX DOE: cache latest Dividends & Other Entitlements table once per day ───
@@ -487,10 +513,10 @@ if "hkex_entitlements_done" not in st.session_state:
         logger.error("HKEX DOE kickoff failed: %s", e)
         st.session_state.hkex_entitlements_done = True
 
-TIMEFRAMES = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365}
+TIMEFRAMES = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "3Y": 1095, "5Y": 1825}
 
 
-@st.cache_data(ttl=45, show_spinner="Fetching data for all A/H pairs...")
+@st.cache_data(ttl=45, show_spinner=_t("Fetching data for all A/H pairs..."))
 def _cached_screener() -> pd.DataFrame:
     """Cached screener with historical premium changes."""
     df = compute_screener_table()
@@ -555,7 +581,7 @@ def _on_ticker_change() -> None:
 def _watchlist_panel() -> None:
     watchlist = get_watchlist()
     if not watchlist:
-        st.caption("Use the top search bar to add stocks.")
+        st.caption(_t("Use the top search bar to add stocks."))
         return
 
     # Batch-fetch live snapshots
@@ -639,7 +665,7 @@ def _watchlist_panel() -> None:
                 for ev in alert_events:
                     if ev["event"] == "fired":
                         st.toast(
-                            f"Alert: {ev['hk_code']} premium {ev['premium']:+.1f}%",
+                            _t("Alert: {code} premium {premium:+.1f}%").format(code=ev["hk_code"], premium=ev["premium"]),
                             icon="\U0001f514",
                         )
             except Exception as e:
@@ -672,36 +698,36 @@ def _watchlist_panel() -> None:
         html += (
             f'<tr class="{sel}">'
             f'<td class="c-sym">'
-            f'<a href="?sel={hk}" target="_self">'
+            f'<a href="?lang={st.session_state.language}&sel={hk}" target="_self">'
             f'<div class="sym-code">{hk}</div>'
             f'<div class="sym-name">{r["name"]}</div>'
             f"</a></td>"
             f'<td class="c-prm">'
-            f'<a href="?sel={hk}" target="_self">'
+            f'<a href="?lang={st.session_state.language}&sel={hk}" target="_self">'
             f'<span class="{cls}">{prem_s}</span></a></td>'
             f'<td class="c-chg">'
-            f'<a href="?sel={hk}" target="_self"><span class="chg-val {chg_cls}">{chg_s}</span></a>'
-            f'<a href="?del={hk}" target="_self" class="row-del" title="Remove">×</a>'
+            f'<a href="?lang={st.session_state.language}&sel={hk}" target="_self"><span class="chg-val {chg_cls}">{chg_s}</span></a>'
+            f'<a href="?lang={st.session_state.language}&del={hk}" target="_self" class="row-del" title="Remove">×</a>'
             f"</td></tr>"
         )
     html += "</tbody></table>"
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(_t(html), unsafe_allow_html=True)
 
 
 def _alert_config_panel() -> None:
     """Alert configuration UI — crossover thresholds (max 3 per stock)."""
     watchlist = get_watchlist()
     if not watchlist:
-        st.caption("Add stocks to watchlist first.")
+        st.caption(_t("Add stocks to watchlist first."))
         return
 
     stock_options = [f"{w['hk_code']} \u2014 {w['name']}" for w in watchlist]
     selected = st.selectbox(
-        "Stock",
+        _t("Stock"),
         stock_options,
         key="alert_stock_select",
         label_visibility="collapsed",
-        placeholder="Select stock...",
+        placeholder=_t("Select stock..."),
     )
     if not selected:
         return
@@ -721,7 +747,7 @@ def _alert_config_panel() -> None:
         with col_del:
             if st.button("\u00d7", key=f"adel_{r['id']}"):
                 delete_alert_rule(alert_hk, r["threshold"])
-                st.toast(f"Deleted {r['threshold']:+.1f}%", icon="\U0001f5d1")
+                st.toast(_t("Deleted {threshold:+.1f}%").format(threshold=r["threshold"]), icon="\U0001f5d1")
                 st.rerun()
 
     # Add new threshold (if under limit)
@@ -729,7 +755,7 @@ def _alert_config_panel() -> None:
         col_inp, col_add = st.columns([4, 1])
         with col_inp:
             new_val = st.number_input(
-                "Threshold %",
+                _t("Threshold %"),
                 value=0.0,
                 step=1.0,
                 format="%.1f",
@@ -740,17 +766,17 @@ def _alert_config_panel() -> None:
             if st.button("+", key="alert_add_btn"):
                 result = upsert_alert_rule(alert_hk, new_val)
                 if result == -1:
-                    st.toast("Max 3 alerts per stock", icon="\u26a0\ufe0f")
+                    st.toast(_t("Max 3 alerts per stock"), icon="\u26a0\ufe0f")
                 else:
-                    st.toast(f"Added alert @ {new_val:+.1f}%", icon="\u2705")
+                    st.toast(_t("Added alert @ {threshold:+.1f}%").format(threshold=new_val), icon="\u2705")
                 st.rerun()
     elif rules:
-        st.caption("Max 3 alerts per stock")
+        st.caption(_t("Max 3 alerts per stock"))
 
     # Show all configured crossover levels across all stocks
     all_rules = get_all_alert_rules_with_state()
     if all_rules:
-        st.markdown("**All Crossover Levels:**")
+        st.markdown(_t("**All Crossover Levels:**"))
         for r in all_rules:
             side = r.get("last_side") or ""
             icon = "\u25b2" if side == "above" else ("\u25bc" if side == "below" else "\u2014")
@@ -762,7 +788,7 @@ def _recent_alerts_panel() -> None:
     history = get_alert_history(limit=5)
     if not history:
         return
-    st.markdown("**Recent Alerts:**")
+    st.markdown(_t("**Recent Alerts:**"))
     for h in history:
         if h["event"] in ("fired", "send_failed"):
             icon = "\U0001f514" if h["event"] == "fired" else "\u274c"
@@ -796,7 +822,7 @@ def _trade_panel() -> None:
     """
     hk = st.session_state.get("selected_hk", "")
     if not hk:
-        st.caption("Select a stock to size a trade.")
+        st.caption(_t("Select a stock to size a trade."))
         return
 
     a_code = get_a_code(hk)
@@ -828,11 +854,11 @@ def _trade_panel() -> None:
     usd_hkd = _get_usd_hkd_cached()
 
     if not h_price or not a_price or not fx:
-        st.caption("Waiting for price data…")
+        st.caption(_t("Waiting for price data…"))
         return
 
     usd = st.number_input(
-        "USD per leg",
+        _t("USD per leg"),
         min_value=100.0,
         value=float(st.session_state.get("_trade_usd", 10000.0)),
         step=500.0,
@@ -856,33 +882,33 @@ def _trade_panel() -> None:
     st.caption(f"HK${h_cost_hkd:,.0f} · ¥{a_cost_cny:,.0f}")
     st.markdown(
         '<span style="color:#DC2626;font-weight:600;font-size:0.75rem;">'
-        "Follow trading rules before placing orders"
-        "</span>",
+        + _t("Follow trading rules before placing orders")
+        + "</span>",
         unsafe_allow_html=True,
     )
 
 
 with st.sidebar:
-    st.toggle("Dark Mode", key="dark_mode")
-    st.markdown("#### Watchlist")
+    st.toggle(_t("Dark Mode"), key="dark_mode")
+    st.markdown(_t("#### Watchlist"))
     _watchlist_panel()
 
     # ── Trade size calculator ──
-    st.markdown("#### Trade")
+    st.markdown(_t("#### Trade"))
     _trade_panel()
 
     # ── Alert Configuration ──
-    st.markdown("#### Alerts")
-    with st.expander("Alert Rules", expanded=False):
+    st.markdown(_t("#### Alerts"))
+    with st.expander(_t("Alert Rules"), expanded=False):
         _alert_config_panel()
 
     # Show recent alerts
     _recent_alerts_panel()
 
     if st.session_state.get("sync_ok"):
-        st.caption("Data sync: OK")
+        st.caption(_t("Data sync: OK"))
     elif st.session_state.get("sync_error"):
-        st.caption(f"Data sync: Failed \u2014 {st.session_state['sync_error'][:50]}")
+        st.caption(_t("Data sync: Failed — {error}").format(error=st.session_state["sync_error"][:50]))
 
 
 # ─── Chart builder ───
@@ -895,7 +921,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
         row_heights=[0.7, 0.3],
         shared_xaxes=True,
         vertical_spacing=0.03,
-        subplot_titles=("H/A Ratio", "Volume (M shares)"),
+        subplot_titles=(_t("H/A Ratio"), _t("Volume (M shares)")),
     )
     fig.add_trace(
         go.Scatter(
@@ -903,8 +929,16 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
             y=df["close"],
             mode="lines",
             line=dict(color=c["up"], width=1.5),
-            name="H/A Ratio",
-            hovertemplate="%{y:.4f}<extra></extra>",
+            name=_t("H/A Ratio"),
+            customdata=df[["a_price", "h_price", "a_volume", "h_volume"]].to_numpy().tolist(),
+            hovertemplate=(
+                _t("H/A Ratio") + ": %{y:.4f}<br>"
+                + _t("A Price (¥)") + ": %{customdata[0]:.2f}<br>"
+                + _t("H Price (HK$)") + ": %{customdata[1]:.2f}<br>"
+                + _t("A Volume (shares)") + ": %{customdata[2]:,.0f}<br>"
+                + _t("H Volume (shares)") + ": %{customdata[3]:,.0f}"
+                + "<extra></extra>"
+            ),
             connectgaps=True,
         ),
         row=1,
@@ -915,7 +949,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
         line_dash="dash",
         line_color=c["parity"],
         opacity=0.6,
-        annotation_text="Parity",
+        annotation_text=_t("Parity"),
         annotation_position="bottom right",
         row=1,
         col=1,
@@ -924,7 +958,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
         go.Bar(
             x=dates,
             y=df["a_volume"] / 1e6,
-            name="A Volume",
+            name=_t("A Volume"),
             marker_color=c["a_bar"],
         ),
         row=2,
@@ -934,7 +968,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
         go.Bar(
             x=dates,
             y=df["h_volume"] / 1e6,
-            name="H Volume",
+            name=_t("H Volume"),
             marker_color=c["h_bar"],
         ),
         row=2,
@@ -964,7 +998,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
         hoverlabel=dict(bgcolor=c["hover"], font_size=12),
     )
     fig.update_yaxes(
-        title_text="H/A Ratio",
+        title_text=_t("H/A Ratio"),
         gridcolor=c["grid"],
         hoverformat=".2f",
         title_font_color=c["text"],
@@ -977,7 +1011,7 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
         col=1,
     )
     fig.update_yaxes(
-        title_text="Volume (M)",
+        title_text=_t("Volume (M)"),
         gridcolor=c["grid"],
         hoverformat=".2f",
         tickformat=".1f",
@@ -1017,23 +1051,23 @@ def _build_chart(df: pd.DataFrame, colors: dict) -> go.Figure:
 def _chart_panel(timeframe: str) -> None:
     display_hk = st.session_state.get("selected_hk", "")
     if not display_hk:
-        st.info("Select a stock from the search bar, or add stocks to the watchlist.")
+        st.info(_t("Select a stock from the search bar, or add stocks to the watchlist."))
         return
 
     a_code = get_a_code(display_hk)
     if not a_code:
-        st.error(f"**{display_hk}** not found in A/H pair mapping.")
+        st.error(_t("**{code}** not found in A/H pair mapping.").format(code=display_hk))
         return
 
     stock_name = get_pair_name(display_hk) or display_hk
     # Exchange marker: Shanghai (沪) for 6xxxxx / 688xxx, Shenzhen (深) for
     # 0xxxxx / 30xxxx, Beijing (北) for 8xxxxx / 43xxxx / 83xxxx.
     if a_code.startswith("6"):
-        exch_char, exch_title = "\u6caa", "Shanghai Stock Exchange"
+        exch_char, exch_title = "\u6caa", _t("Shanghai Stock Exchange")
     elif a_code.startswith(("0", "3")):
-        exch_char, exch_title = "\u6df1", "Shenzhen Stock Exchange"
+        exch_char, exch_title = "\u6df1", _t("Shenzhen Stock Exchange")
     elif a_code.startswith(("4", "8")):
-        exch_char, exch_title = "\u5317", "Beijing Stock Exchange"
+        exch_char, exch_title = "\u5317", _t("Beijing Stock Exchange")
     else:
         exch_char = exch_title = ""
     exch_mark = (
@@ -1057,26 +1091,61 @@ def _chart_panel(timeframe: str) -> None:
     hk_div_ex_date = _next_hk_div_ex_date(display_hk)
     hk_div_ex_mark = (
         f' <span style="color:var(--text-2);font-size:0.85em;font-weight:500;">'
-        f"HK div ex-date: {hk_div_ex_date}</span>"
+        f"{_t('HK div ex-date:')} {hk_div_ex_date}</span>"
         if hk_div_ex_date
         else ""
     )
     st.markdown(
-        f"### {stock_name}  `HK.{display_hk}`{red_chip_mark} / "
-        f"`A.{a_code}`{exch_mark}{restricted_mark}{hk_div_ex_mark}",
+        f"### {stock_name}  `HK.{display_hk}`{_t(red_chip_mark)} / "
+        f"`A.{a_code}`{exch_mark}{_t(restricted_mark)}{hk_div_ex_mark}",
         unsafe_allow_html=True,
     )
 
+    eligibility = get_short_eligibility(display_hk, a_code)
+    if eligibility is None:
+        st.caption(_t("Short selling eligibility: A-share — Not verified | H-share — Not verified"))
+    else:
+        a_status = _t("Eligible") if eligibility["a_eligible"] else _t("Not on the list")
+        h_status = _t("Eligible") if eligibility["h_eligible"] else _t("Not on the list")
+        st.caption(
+            _t("A-share margin short: {a_status} ({a_date}) | H-share short selling: {h_status} ({h_date})")
+            .format(a_status=a_status, a_date=eligibility["a_source_date"],
+                    h_status=h_status, h_date=eligibility["h_source_date"])
+        )
+    st.caption(_t("Exchange-list eligibility only; broker borrow availability and fees must be checked separately."))
+
+    option_info = get_option_info(display_hk, a_code)
+    if option_info is None:
+        st.caption(_t("Stock options: Not verified"))
+    else:
+        h_options = (
+            _t("Listed (weekly expiries available)") if option_info["weekly"]
+            else _t("Listed (no weekly expiries)")
+        ) if option_info["h_listed"] else _t("Not on the listed stock options list")
+        option_text = _t("A-share stock options: No exchange-listed product | H-share stock options: {status}").format(status=h_options)
+        if option_info["h_listed"]:
+            option_text += _t(" | Standard contract: {size:,} shares | HKATS: {hkats}").format(
+                size=option_info["contract_size"], hkats=option_info["hkats"]
+            )
+        st.caption(option_text)
+        st.caption(_t("HKEX options list: {date}; A-share market checked: {checked}. Exchange-listed stock options only; excludes ETF options, warrants and OTC options.").format(
+            date=option_info["source_date"], checked=option_info["checked_on"]
+        ))
+
     lookback = TIMEFRAMES.get(timeframe, 90)
     end_date = date.today()
-    start_date = end_date - timedelta(days=lookback)
+    start_date = (
+        (pd.Timestamp(end_date) - pd.DateOffset(years=int(timeframe[:-1]))).date()
+        if timeframe in ("1Y", "3Y", "5Y")
+        else end_date - timedelta(days=lookback)
+    )
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
 
     # ── Load K-line data if stock/timeframe changed ──
     cache_key = f"{display_hk}_{timeframe}"
     if st.session_state.get("_cache_key") != cache_key:
-        with st.spinner("Loading..."), ThreadPoolExecutor(max_workers=4) as pool:
+        with st.spinner(_t("Loading...")), ThreadPoolExecutor(max_workers=4) as pool:
             fut_h = pool.submit(load_kline, display_hk, "H", start_str, end_str)
             fut_a = pool.submit(load_kline, a_code, "A", start_str, end_str)
             fut_fx_spot = pool.submit(get_fx_latest)
@@ -1088,7 +1157,7 @@ def _chart_panel(timeframe: str) -> None:
 
         # Cache miss → live fetch as fallback (background sync may not have run yet)
         if df_h.empty or df_a.empty:
-            with st.spinner("Fetching live data..."), ThreadPoolExecutor(max_workers=2) as pool:
+            with st.spinner(_t("Fetching live data...")), ThreadPoolExecutor(max_workers=2) as pool:
                 fut_live_h = pool.submit(get_h_kline, display_hk, start_str, end_str) if df_h.empty else None
                 fut_live_a = pool.submit(get_a_kline, a_code, start_str, end_str) if df_a.empty else None
                 try:
@@ -1102,21 +1171,21 @@ def _chart_panel(timeframe: str) -> None:
         data_ok = True
         if df_h.empty:
             st.error(
-                "**Failed to fetch H-share data.** Possible causes:\n"
+                _t("**Failed to fetch H-share data.** Possible causes:\n"
                 "- Futu OpenD gateway is not running (check `localhost:11111`)\n"
                 "- Network connection to OpenD is blocked or timed out\n"
                 "- The stock code may be invalid or delisted\n\n"
                 "AKShare fallback was also attempted. "
-                "If cached data is available, try again later."
+                "If cached data is available, try again later.")
             )
             data_ok = False
         elif df_a.empty:
-            st.error("Failed to fetch A-share data.")
+            st.error(_t("Failed to fetch A-share data."))
             data_ok = False
         else:
             df_ratio = compute_ratio_ohlcv(df_a, df_h, df_fx)
             if df_ratio.empty:
-                st.error("No overlapping trading dates.")
+                st.error(_t("No overlapping trading dates."))
                 data_ok = False
 
         if not data_ok:
@@ -1197,6 +1266,8 @@ def _chart_panel(timeframe: str) -> None:
                 df_ratio.at[idx, "low"] = min(df_ratio.at[idx, "low"], live_low)
                 df_ratio.at[idx, "a_volume"] = a_snap["volume"]
                 df_ratio.at[idx, "h_volume"] = h_snap["volume"]
+                df_ratio.at[idx, "a_price"] = a_snap["price"]
+                df_ratio.at[idx, "h_price"] = h_snap["price"]
             else:
                 new_row = pd.DataFrame(
                     [
@@ -1208,6 +1279,8 @@ def _chart_panel(timeframe: str) -> None:
                             "close": live_ratio,
                             "a_volume": a_snap["volume"],
                             "h_volume": h_snap["volume"],
+                            "a_price": a_snap["price"],
+                            "h_price": h_snap["price"],
                         }
                     ]
                 )
@@ -1244,35 +1317,36 @@ def _chart_panel(timeframe: str) -> None:
 
     usd_hkd = _get_usd_hkd_cached()
     cols = st.columns(9)
-    cols[0].metric("A Price (¥)", f"{a_price_disp:.2f}" if a_price_disp else "—")
-    cols[1].metric("H Price (HK$)", f"{h_price_disp:.2f}" if h_price_disp else "—")
-    cols[2].metric("H Premium", f"{premium_pct:+.2f}%")
-    cols[3].metric("FX (HKD/CNH)", f"{fx:.4f}")
+    cols[0].metric(_t("A Price (¥)"), f"{a_price_disp:.2f}" if a_price_disp else "—")
+    cols[1].metric(_t("H Price (HK$)"), f"{h_price_disp:.2f}" if h_price_disp else "—")
+    cols[2].metric(_t("H Premium"), f"{premium_pct:+.2f}%")
+    cols[3].metric(_t("FX (HKD/CNH)"), f"{fx:.4f}")
     cols[4].metric("USD/HKD", f"{usd_hkd:.4f}")
-    cols[5].metric("1D H/A Vol", f"{vol_ratio_1d:.2f}x")
-    cols[6].metric("7D H/A Vol", f"{vol_ratio_7d:.2f}x")
-    cols[7].metric("7D H Avg Vol", f"{h_vol_avg_7d / 1e6:.1f}M")
-    cols[8].metric("H Vol Today", f"{h_vol_today / 1e6:.1f}M")
+    cols[5].metric(_t("1D H/A Vol"), f"{vol_ratio_1d:.2f}x")
+    cols[6].metric(_t("7D H/A Vol"), f"{vol_ratio_7d:.2f}x")
+    cols[7].metric(_t("7D H Avg Vol"), f"{h_vol_avg_7d / 1e6:.1f}M")
+    cols[8].metric(_t("H Vol Today"), f"{h_vol_today / 1e6:.1f}M")
 
     # Reuse cached figure if prices haven't changed (avoids expensive rebuild + serialization)
-    if data_changed or "_cached_fig" not in st.session_state:
+    if data_changed or "_cached_fig" not in st.session_state or st.session_state.get("_fig_language") != st.session_state.language:
         fig = _build_chart(df_ratio, _chart_colors(st.session_state.dark_mode))
         st.session_state["_cached_fig"] = fig
+        st.session_state["_fig_language"] = st.session_state.language
     else:
         fig = st.session_state["_cached_fig"]
     st.plotly_chart(fig, width="stretch", key="live_chart")
 
-    with st.expander("Raw Ratio Data"):
+    with st.expander(_t("Raw Ratio Data")):
         disp = df_ratio.copy()
         disp["date"] = pd.to_datetime(disp["date"]).dt.strftime("%Y-%m-%d")
         disp["a_volume"] = disp["a_volume"].apply(lambda x: f"{x / 1e6:.1f}M" if x > 0 else "—")
         disp["h_volume"] = disp["h_volume"].apply(lambda x: f"{x / 1e6:.1f}M" if x > 0 else "—")
-        st.dataframe(disp, width="stretch", hide_index=True)
+        st.dataframe(disp.rename(columns={col: _t(col) for col in disp.columns}), width="stretch", hide_index=True)
 
 
 # ─── Tabs ───
 tab_chart, tab_screener = st.tabs(
-    ["Chart", "Screener"],
+    [_t("Chart"), _t("Screener")],
     key="active_tab",
 )
 
@@ -1280,18 +1354,19 @@ with tab_chart:
     col_ticker, col_tf, col_add = st.columns([4, 3, 1], vertical_alignment="bottom")
     with col_ticker:
         st.selectbox(
-            "Stock",
+            _t("Stock"),
             options=_pair_options(),
             index=None,
-            placeholder="Search ticker...",
+            placeholder=_t("Search ticker..."),
             label_visibility="collapsed",
             key="ticker_select",
             on_change=_on_ticker_change,
         )
     with col_tf:
         timeframe = st.pills(
-            "Timeframe",
+            _t("Timeframe"),
             options=list(TIMEFRAMES.keys()),
+            format_func=lambda value, lang=st.session_state.language: translate(value, lang),
             default="3M",
             label_visibility="collapsed",
             key="tf_pills",
@@ -1299,7 +1374,7 @@ with tab_chart:
         if not timeframe:
             timeframe = "3M"
     with col_add:
-        if st.button("+ Watch", width="stretch", help="Add to watchlist"):
+        if st.button(_t("+ Watch"), width="stretch", help=_t("Add to watchlist")):
             hk = st.session_state.selected_hk
             if hk:
                 a = get_a_code(hk)
@@ -1317,11 +1392,11 @@ def _screener_panel() -> None:
 
     if df_scr.empty:
         st.warning(
-            "**No screener data available.** Possible causes:\n"
+            _t("**No screener data available.** Possible causes:\n"
             "- Futu OpenD gateway is not running (check `localhost:11111`)\n"
             "- Sina/Tencent A-share APIs are unreachable\n"
             "- Network connection issues\n\n"
-            "Start OpenD and refresh the page to load live data."
+            "Start OpenD and refresh the page to load live data.")
         )
         return
 
@@ -1329,7 +1404,7 @@ def _screener_panel() -> None:
     if "premium" in df_scr.columns:
         df_scr = df_scr.sort_values("premium", ascending=False, na_position="last")
 
-    st.caption(f"{len(df_scr)} pairs | Click a row to view chart")
+    st.caption(_t("{count} pairs | Click a row to view chart").format(count=len(df_scr)))
 
     def _fmt(val, fmt: str) -> str:
         if pd.isna(val) or val is None:
@@ -1362,9 +1437,9 @@ def _screener_panel() -> None:
         d20 = r.get("mo_chg")
         html += (
             f"<tr>"
-            f'<td><a href="?sel={hk}" target="_self">{hk}</a></td>'
-            f'<td><a href="?sel={hk}" target="_self">{name}</a></td>'
-            f'<td><a href="?sel={hk}" target="_self">'
+            f'<td><a href="?lang={st.session_state.language}&sel={hk}" target="_self">{hk}</a></td>'
+            f'<td><a href="?lang={st.session_state.language}&sel={hk}" target="_self">{name}</a></td>'
+            f'<td><a href="?lang={st.session_state.language}&sel={hk}" target="_self">'
             f'<span class="{_cls(prem)}">{_fmt(prem, "{:.2f}%")}</span></a></td>'
             f"<td>{_fmt(vol * 100 if pd.notna(vol) else None, '{:.1f}%')}</td>"
             f'<td><span class="{_cls(d1)}">{_fmt(d1, "{:+.2f}%")}</span></td>'
@@ -1373,7 +1448,7 @@ def _screener_panel() -> None:
             f"</tr>"
         )
     html += "</tbody></table></div>"
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(_t(html), unsafe_allow_html=True)
 
     # Sort JS — st.html injects into parent page (not iframe), so JS can
     # access the table rendered by st.markdown above.
@@ -1417,9 +1492,9 @@ def _screener_panel() -> None:
     )
 
     if not df_scr.empty:
-        csv = df_scr.to_csv(index=False).encode("utf-8-sig")
+        csv = df_scr.rename(columns={col: _t(col) for col in df_scr.columns}).to_csv(index=False).encode("utf-8-sig")
         st.download_button(
-            label="Download CSV",
+            label=_t("Download CSV"),
             data=csv,
             file_name="ah_screener.csv",
             mime="text/csv",

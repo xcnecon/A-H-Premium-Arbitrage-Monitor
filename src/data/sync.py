@@ -41,6 +41,25 @@ logger = logging.getLogger(__name__)
 
 # Module-level lock: prevents concurrent background syncs from overlapping
 _bg_sync_lock = threading.Lock()
+_sync_status_lock = threading.Lock()
+_sync_status: dict[str, Any] = {"state": "idle"}
+
+
+def get_sync_status() -> dict[str, Any]:
+    """Return a snapshot for the UI without blocking on network work."""
+    with _sync_status_lock:
+        return dict(_sync_status)
+
+
+def _set_sync_status(**values: Any) -> None:
+    with _sync_status_lock:
+        _sync_status.update(values)
+
+
+def _sync_progress(message: str, current: int, total: int) -> None:
+    _set_sync_status(message=message, current=current, total=total)
+
+
 _a_trade_dates_cache: set[date] | None = None
 _HOLIDAY_CN_URL = "https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/{year}.json"
 _HKT = ZoneInfo("Asia/Hong_Kong")
@@ -261,7 +280,7 @@ def sync_all(
 
         if a_needs_hist and is_a_trading_day and hk not in need_today:
             need_today.append(hk)  # historical A sync stops at prev_a_td; snapshot fills today
-        elif last_a < today_str and is_a_trading_day and hk not in need_today:
+        elif last_a and last_a < today_str and is_a_trading_day and hk not in need_today:
             need_today.append(hk)  # only today missing → batch snapshot
 
     skipped = (
@@ -366,6 +385,8 @@ def sync_all(
     # On first run, recompute all; on delta runs, only last 30 days
     has_new_data = h_count > 0 or a_count > 0
     if has_new_data:
+        if progress_cb:
+            progress_cb("正在同步汇率并计算历史溢价", 0, 0)
         if need_full_h or need_full_a:
             # First-time stocks: need full premium computation
             prem_start = default_start
@@ -391,6 +412,8 @@ def sync_all(
     try:
         from src.alerts.special_events import evaluate_special_events
 
+        if progress_cb:
+            progress_cb("正在检查特殊事件", 0, 0)
         summary["special_events"] = evaluate_special_events(pairs=pairs)
     except Exception as e:
         logger.warning("Special-event evaluation failed: %s", e)
@@ -410,9 +433,13 @@ def sync_background() -> dict[str, Any]:
         logger.info("Background sync already running, skipping")
         return {"skipped": True}
     try:
-        return sync_all(_defer_ok=False)
+        _set_sync_status(state="running", message="正在检查缺失行情", current=0, total=0, error=None)
+        summary = sync_all(progress_cb=_sync_progress, _defer_ok=False)
+        _set_sync_status(state="complete", errors=list(summary.get("errors", [])))
+        return summary
     except Exception as e:
         logger.error("Background sync failed: %s", e)
+        _set_sync_status(state="failed", error=str(e))
         return {"error": str(e)}
     finally:
         _bg_sync_lock.release()

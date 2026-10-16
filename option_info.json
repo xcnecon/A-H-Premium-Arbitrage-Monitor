@@ -1,0 +1,1692 @@
+{
+  "checked_on": "2026-10-16",
+  "h_source_date": "2026-10-05",
+  "h_source_url": "https://www.hkex.com.hk/Products/Listed-Derivatives/Single-Stock/Stock-Options?sc_lang=en",
+  "a_market_status": "no_exchange_listed_single_stock_options",
+  "a_source_urls": [
+    "https://www.sse.com.cn/assortment/options/",
+    "https://www.szse.cn/option/index/"
+  ],
+  "pairs": [
+    {
+      "hk_code": "00038",
+      "a_code": "601038",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00107",
+      "a_code": "601107",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00168",
+      "a_code": "600600",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00177",
+      "a_code": "600377",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00187",
+      "a_code": "600860",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00300",
+      "a_code": "000333",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 500,
+      "hkats": "MDG"
+    },
+    {
+      "hk_code": "00317",
+      "a_code": "600685",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00323",
+      "a_code": "600808",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00338",
+      "a_code": "600688",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00347",
+      "a_code": "000898",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00358",
+      "a_code": "600362",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "JXC"
+    },
+    {
+      "hk_code": "00386",
+      "a_code": "600028",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2000,
+      "hkats": "CPC"
+    },
+    {
+      "hk_code": "00390",
+      "a_code": "601390",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "CRG"
+    },
+    {
+      "hk_code": "00470",
+      "a_code": "300450",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00501",
+      "a_code": "603501",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00525",
+      "a_code": "601333",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00537",
+      "a_code": "688337",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00548",
+      "a_code": "600548",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00553",
+      "a_code": "600775",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00564",
+      "a_code": "601717",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00568",
+      "a_code": "002490",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00588",
+      "a_code": "601588",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00598",
+      "a_code": "601598",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00638",
+      "a_code": "300638",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00668",
+      "a_code": "300866",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00670",
+      "a_code": "600115",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00699",
+      "a_code": "600699",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00719",
+      "a_code": "000756",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00728",
+      "a_code": "601728",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2000,
+      "hkats": "CTC"
+    },
+    {
+      "hk_code": "00753",
+      "a_code": "601111",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2000,
+      "hkats": "AIR"
+    },
+    {
+      "hk_code": "00763",
+      "a_code": "000063",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 200,
+      "hkats": "ZTE"
+    },
+    {
+      "hk_code": "00811",
+      "a_code": "601811",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00857",
+      "a_code": "601857",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2000,
+      "hkats": "PEC"
+    },
+    {
+      "hk_code": "00874",
+      "a_code": "600332",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00883",
+      "a_code": "600938",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 1000,
+      "hkats": "CNC"
+    },
+    {
+      "hk_code": "00895",
+      "a_code": "002672",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00902",
+      "a_code": "600011",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2000,
+      "hkats": "HNP"
+    },
+    {
+      "hk_code": "00914",
+      "a_code": "600585",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 500,
+      "hkats": "ACC"
+    },
+    {
+      "hk_code": "00916",
+      "a_code": "001289",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00921",
+      "a_code": "000921",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00939",
+      "a_code": "601939",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "XCC"
+    },
+    {
+      "hk_code": "00941",
+      "a_code": "600941",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 500,
+      "hkats": "CHT"
+    },
+    {
+      "hk_code": "00956",
+      "a_code": "600956",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00981",
+      "a_code": "688981",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 2500,
+      "hkats": "SMC"
+    },
+    {
+      "hk_code": "00991",
+      "a_code": "601991",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00995",
+      "a_code": "600012",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "00998",
+      "a_code": "601998",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "CTB"
+    },
+    {
+      "hk_code": "01033",
+      "a_code": "600871",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01053",
+      "a_code": "601005",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01055",
+      "a_code": "600029",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01057",
+      "a_code": "002703",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01065",
+      "a_code": "600874",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01071",
+      "a_code": "600027",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01072",
+      "a_code": "600875",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01081",
+      "a_code": "002487",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01088",
+      "a_code": "601088",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 500,
+      "hkats": "CSE"
+    },
+    {
+      "hk_code": "01108",
+      "a_code": "600876",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01138",
+      "a_code": "600026",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01157",
+      "a_code": "000157",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01171",
+      "a_code": "600188",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2000,
+      "hkats": "YZC"
+    },
+    {
+      "hk_code": "01186",
+      "a_code": "601186",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 500,
+      "hkats": "CRC"
+    },
+    {
+      "hk_code": "01187",
+      "a_code": "301087",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01211",
+      "a_code": "002594",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 500,
+      "hkats": "BYD"
+    },
+    {
+      "hk_code": "01276",
+      "a_code": "600276",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01288",
+      "a_code": "601288",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 10000,
+      "hkats": "XAB"
+    },
+    {
+      "hk_code": "01304",
+      "a_code": "688279",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01330",
+      "a_code": "601330",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01336",
+      "a_code": "601336",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "NCL"
+    },
+    {
+      "hk_code": "01339",
+      "a_code": "601319",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 5000,
+      "hkats": "PIN"
+    },
+    {
+      "hk_code": "01347",
+      "a_code": "688347",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2000,
+      "hkats": "HOS"
+    },
+    {
+      "hk_code": "01349",
+      "a_code": "688505",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01375",
+      "a_code": "601375",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01377",
+      "a_code": "301377",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01385",
+      "a_code": "688385",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01398",
+      "a_code": "601398",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "XIC"
+    },
+    {
+      "hk_code": "01456",
+      "a_code": "601456",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01513",
+      "a_code": "000513",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01528",
+      "a_code": "601828",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01618",
+      "a_code": "601618",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01635",
+      "a_code": "600635",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01658",
+      "a_code": "601658",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 5000,
+      "hkats": "XPB"
+    },
+    {
+      "hk_code": "01688",
+      "a_code": "002600",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01766",
+      "a_code": "601766",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01772",
+      "a_code": "002460",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 200,
+      "hkats": "GLI"
+    },
+    {
+      "hk_code": "01776",
+      "a_code": "000776",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01787",
+      "a_code": "600547",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 250,
+      "hkats": "SGM"
+    },
+    {
+      "hk_code": "01800",
+      "a_code": "601800",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "CCC"
+    },
+    {
+      "hk_code": "01812",
+      "a_code": "000488",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01816",
+      "a_code": "003816",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 10000,
+      "hkats": "CGN"
+    },
+    {
+      "hk_code": "01858",
+      "a_code": "688236",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01877",
+      "a_code": "688180",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01880",
+      "a_code": "601888",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01898",
+      "a_code": "601898",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "CCE"
+    },
+    {
+      "hk_code": "01919",
+      "a_code": "601919",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2500,
+      "hkats": "COS"
+    },
+    {
+      "hk_code": "01963",
+      "a_code": "601963",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "01988",
+      "a_code": "600016",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2500,
+      "hkats": "MSB"
+    },
+    {
+      "hk_code": "01989",
+      "a_code": "001389",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02009",
+      "a_code": "601992",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02016",
+      "a_code": "601916",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02039",
+      "a_code": "000039",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02050",
+      "a_code": "002050",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 200,
+      "hkats": "ZSI"
+    },
+    {
+      "hk_code": "02068",
+      "a_code": "601068",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02196",
+      "a_code": "600196",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02202",
+      "a_code": "000002",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "VNK"
+    },
+    {
+      "hk_code": "02208",
+      "a_code": "002202",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 400,
+      "hkats": "GST"
+    },
+    {
+      "hk_code": "02218",
+      "a_code": "605198",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02238",
+      "a_code": "601238",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 4000,
+      "hkats": "GAC"
+    },
+    {
+      "hk_code": "02245",
+      "a_code": "001246",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02249",
+      "a_code": "688249",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02315",
+      "a_code": "688796",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02318",
+      "a_code": "601318",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 500,
+      "hkats": "PAI"
+    },
+    {
+      "hk_code": "02333",
+      "a_code": "601633",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 500,
+      "hkats": "GWM"
+    },
+    {
+      "hk_code": "02338",
+      "a_code": "000338",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 1000,
+      "hkats": "WCP"
+    },
+    {
+      "hk_code": "02359",
+      "a_code": "603259",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 500,
+      "hkats": "WXA"
+    },
+    {
+      "hk_code": "02402",
+      "a_code": "688339",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02465",
+      "a_code": "603906",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02475",
+      "a_code": "002475",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 100,
+      "hkats": "LSP"
+    },
+    {
+      "hk_code": "02476",
+      "a_code": "300476",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 100,
+      "hkats": "VGT"
+    },
+    {
+      "hk_code": "02493",
+      "a_code": "688062",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02579",
+      "a_code": "300919",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02600",
+      "a_code": "601600",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2000,
+      "hkats": "ALC"
+    },
+    {
+      "hk_code": "02601",
+      "a_code": "601601",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "CPI"
+    },
+    {
+      "hk_code": "02603",
+      "a_code": "002803",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02607",
+      "a_code": "601607",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02611",
+      "a_code": "601211",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02628",
+      "a_code": "601628",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 1000,
+      "hkats": "CLI"
+    },
+    {
+      "hk_code": "02631",
+      "a_code": "688234",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02636",
+      "a_code": "688036",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02648",
+      "a_code": "603345",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02676",
+      "a_code": "688052",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02691",
+      "a_code": "603093",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02692",
+      "a_code": "003021",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02701",
+      "a_code": "300077",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02714",
+      "a_code": "002714",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02715",
+      "a_code": "002747",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02727",
+      "a_code": "601727",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02768",
+      "a_code": "002768",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02865",
+      "a_code": "002865",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02866",
+      "a_code": "601866",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02880",
+      "a_code": "601880",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02883",
+      "a_code": "601808",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "02899",
+      "a_code": "601899",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 2000,
+      "hkats": "ZJM"
+    },
+    {
+      "hk_code": "03200",
+      "a_code": "301200",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03223",
+      "a_code": "300223",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03228",
+      "a_code": "603228",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03268",
+      "a_code": "002881",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03288",
+      "a_code": "603288",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03296",
+      "a_code": "603296",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03308",
+      "a_code": "300308",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 50,
+      "hkats": "ZJI"
+    },
+    {
+      "hk_code": "03328",
+      "a_code": "601328",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "BCM"
+    },
+    {
+      "hk_code": "03347",
+      "a_code": "300347",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03369",
+      "a_code": "601326",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03606",
+      "a_code": "600660",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03618",
+      "a_code": "601077",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03661",
+      "a_code": "300661",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03678",
+      "a_code": "001236",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03750",
+      "a_code": "300750",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 100,
+      "hkats": "CAT"
+    },
+    {
+      "hk_code": "03757",
+      "a_code": "300757",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03759",
+      "a_code": "300759",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03866",
+      "a_code": "002948",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03898",
+      "a_code": "688187",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03908",
+      "a_code": "601995",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03958",
+      "a_code": "600958",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03968",
+      "a_code": "600036",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 500,
+      "hkats": "CMB"
+    },
+    {
+      "hk_code": "03969",
+      "a_code": "688009",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03986",
+      "a_code": "603986",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "03988",
+      "a_code": "601988",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "XBC"
+    },
+    {
+      "hk_code": "03993",
+      "a_code": "603993",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 9000,
+      "hkats": "MOL"
+    },
+    {
+      "hk_code": "03996",
+      "a_code": "601868",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06030",
+      "a_code": "600030",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 1000,
+      "hkats": "CTS"
+    },
+    {
+      "hk_code": "06031",
+      "a_code": "600031",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06066",
+      "a_code": "601066",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06067",
+      "a_code": "300568",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06099",
+      "a_code": "600999",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06127",
+      "a_code": "603127",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06160",
+      "a_code": "688235",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 200,
+      "hkats": "BOM"
+    },
+    {
+      "hk_code": "06166",
+      "a_code": "603083",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06178",
+      "a_code": "601788",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06185",
+      "a_code": "688185",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06196",
+      "a_code": "002936",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06198",
+      "a_code": "601298",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06613",
+      "a_code": "300433",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06655",
+      "a_code": "600801",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06680",
+      "a_code": "300748",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06690",
+      "a_code": "600690",
+      "h_listed": true,
+      "weekly": false,
+      "contract_size": 2000,
+      "hkats": "HES"
+    },
+    {
+      "hk_code": "06693",
+      "a_code": "600988",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06727",
+      "a_code": "688031",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06745",
+      "a_code": "601678",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06806",
+      "a_code": "000166",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06809",
+      "a_code": "688008",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06818",
+      "a_code": "601818",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06821",
+      "a_code": "002821",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06826",
+      "a_code": "688366",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06865",
+      "a_code": "601865",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06869",
+      "a_code": "601869",
+      "h_listed": true,
+      "weekly": true,
+      "contract_size": 500,
+      "hkats": "YOF"
+    },
+    {
+      "hk_code": "06881",
+      "a_code": "601881",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06886",
+      "a_code": "601688",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06936",
+      "a_code": "002352",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "06951",
+      "a_code": "300408",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09607",
+      "a_code": "603650",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09611",
+      "a_code": "603341",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09630",
+      "a_code": "688630",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09696",
+      "a_code": "002466",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09927",
+      "a_code": "601127",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09969",
+      "a_code": "688428",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09976",
+      "a_code": "301308",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09980",
+      "a_code": "605499",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09981",
+      "a_code": "002130",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09989",
+      "a_code": "002399",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    },
+    {
+      "hk_code": "09995",
+      "a_code": "688331",
+      "h_listed": false,
+      "weekly": false,
+      "contract_size": null,
+      "hkats": null
+    }
+  ]
+}
