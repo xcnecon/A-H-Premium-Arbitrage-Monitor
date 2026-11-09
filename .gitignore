@@ -86,6 +86,7 @@ CLAUDE.md
 *.db-wal
 *.db-shm
 .ah-arb/
+.runtime/
 
 # ===========================
 # Data files

@@ -16,6 +16,9 @@ import asyncio
 import logging
 import threading
 import time
+import hashlib
+import tempfile
+from pathlib import Path
 from datetime import date, datetime, timedelta
 
 import httpx
@@ -79,6 +82,19 @@ def _get_yf_session():
         kwargs["proxies"] = YAHOO_PROXY
         logger.info("Yahoo Finance using proxy: %s", list(YAHOO_PROXY.values())[0])
 
+    # libcurl on Windows cannot load a CA bundle from a non-ASCII path.
+    # Keep certificate validation enabled using the same bundle in TEMP.
+    import certifi
+
+    ca_path = Path(certifi.where())
+    if not str(ca_path).isascii():
+        bundle = ca_path.read_bytes()
+        digest = hashlib.sha256(bundle).hexdigest()[:16]
+        ascii_ca = Path(tempfile.gettempdir()) / f"ah-arb-ca-{digest}.pem"
+        if not ascii_ca.exists():
+            ascii_ca.write_bytes(bundle)
+        if str(ascii_ca).isascii():
+            kwargs["verify"] = str(ascii_ca)
     _yf_session = Session(**kwargs)
     return _yf_session
 

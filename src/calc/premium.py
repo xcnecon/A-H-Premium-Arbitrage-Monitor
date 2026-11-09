@@ -24,7 +24,8 @@ def compute_ratio_ohlcv(
         df_fx: FX rates with columns: date, rate (CNH per 1 HKD, ≈0.92)
 
     Returns:
-        DataFrame with columns: date, open, high, low, close, a_volume, h_volume
+        DataFrame with columns: date, open, high, low, close, a_volume,
+        h_volume, a_price (CNY close), h_price (HKD close).
     """
     if df_a.empty or df_h.empty:
         logger.warning("Empty input dataframe(s)")
@@ -76,6 +77,9 @@ def compute_ratio_ohlcv(
     result["date"] = merged["date"]
     result["open"] = (merged["open_h"] * merged["fx"]) / merged["open_a"]
     result["close"] = (merged["close_h"] * merged["fx"]) / merged["close_a"]
+    # Keep the original, unadjusted closes aligned by trading date for hover.
+    result["a_price"] = merged["close_a"].astype(float)
+    result["h_price"] = merged["close_h"].astype(float)
     # High ratio ≈ max(H/A) ≈ (H_high * fx) / A_low
     result["high"] = (merged["high_h"] * merged["fx"]) / merged["low_a"]
     # Low ratio ≈ min(H/A) ≈ (H_low * fx) / A_high

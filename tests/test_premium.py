@@ -49,6 +49,19 @@ def test_ratio_close_value():
     assert 0.70 < result.iloc[0]["close"] < 0.72
 
 
+def test_hover_prices_follow_trading_dates_and_keep_original_currencies():
+    df_a, df_h, df_fx = _make_test_data(n=3)
+    df_a["close"] = [10.0, 20.0, 30.0]
+    df_h["close"] = [8.0, 18.0, 28.0]
+    # Different order and a missing H trading day must not shift prices.
+    result = compute_ratio_ohlcv(df_a, df_h.iloc[[2, 0]], df_fx)
+
+    assert result["date"].tolist() == list(pd.to_datetime(["2024-01-01", "2024-01-03"]))
+    assert result["a_price"].tolist() == [10.0, 30.0]
+    assert result["h_price"].tolist() == [8.0, 28.0]
+    assert result.iloc[-1]["close"] == 28.0 * 0.883 / 30.0
+
+
 def test_empty_input():
     df_a, _, df_fx = _make_test_data()
     empty = pd.DataFrame()

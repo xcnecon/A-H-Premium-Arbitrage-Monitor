@@ -86,6 +86,11 @@ def get_a_kline(code: str, start: str, end: str, adjust: str = "") -> pd.DataFra
 
     # AKShare tx returns English columns: date, open, close, high, low, amount
     # Or sometimes Chinese: 日期, 开盘, 收盘, 最高, 最低, 成交量, 成交额
+    # New schemas expose volume in shares, amount in CNY and turnover as a
+    # turnover rate. Older schemas use amount for volume in lots.
+    modern_schema = "volume" in df.columns and "amount" in df.columns
+    if modern_schema:
+        df = df.drop(columns=["turnover"], errors="ignore").rename(columns={"amount": "成交额"})
     col_map = {}
     for col in df.columns:
         lc = col.lower()
@@ -111,7 +116,7 @@ def get_a_kline(code: str, start: str, end: str, adjust: str = "") -> pd.DataFra
     df["date"] = pd.to_datetime(df["date"]).dt.date
 
     # A-share volume from Tencent is in lots (手, 1手=100股), convert to shares
-    if "volume" in df.columns:
+    if "volume" in df.columns and not modern_schema:
         df["volume"] = df["volume"] * 100
 
     # Ensure volume and turnover columns exist

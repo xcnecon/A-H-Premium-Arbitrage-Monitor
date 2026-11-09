@@ -3,10 +3,37 @@ import json
 from datetime import date, datetime
 
 import pandas as pd
+import pytest
 
 from src.data import sync
 from src.storage.db import init_db
 from src.storage.kline_cache import get_last_sync_date, update_sync_meta
+
+
+@pytest.mark.parametrize("h_date", ["2026-05-05", "2026-05-06"])
+@pytest.mark.parametrize("a_trading_day", [True, False])
+def test_missing_a_history_with_existing_h_history(monkeypatch, h_date, a_trading_day):
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 5, 6)
+
+    pairs = {"01234": {"a_code": "600001"}}
+    fetched = []
+    monkeypatch.setattr(sync, "date", FakeDate)
+    monkeypatch.setattr(sync, "get_all_pairs", lambda: pairs)
+    monkeypatch.setattr(sync, "get_all_sync_meta", lambda: {("01234", "H"): h_date})
+    monkeypatch.setattr(sync, "_prev_a_trading_day", lambda d: date(2026, 5, 5))
+    monkeypatch.setattr(sync, "_is_a_trading_day", lambda d: a_trading_day)
+    monkeypatch.setattr(sync, "_sync_a_klines_hist", lambda p, *args: fetched.append(p) or 1)
+    monkeypatch.setattr(sync, "_sync_today_from_snapshots", lambda *args: 0)
+    monkeypatch.setattr(sync, "get_fx_range", lambda *args: pd.DataFrame())
+    monkeypatch.setattr(sync, "_recompute_premium", lambda *args: 0)
+
+    summary = sync.sync_all(_defer_ok=False)
+
+    assert fetched == [pairs]
+    assert summary["errors"] == []
 
 
 def test_daily_snapshot_ready_uses_hk_close_buffer():
@@ -249,3 +276,46 @@ def test_a_share_calendar_falls_back_to_holiday_cn(monkeypatch):
     assert date(2026, 5, 4) not in trade_dates
     assert date(2026, 5, 5) not in trade_dates
     assert date(2026, 5, 6) in trade_dates
+
+def test_background_sync_does_not_duplicate_work(monkeypatch):
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def fake_sync(**kwargs):
+        calls.append(kwargs)
+        kwargs['progress_cb']('Downloading A history', 1, 5)
+        started.set()
+        assert release.wait(timeout=5)
+        return {'errors': []}
+
+    monkeypatch.setattr(sync, 'sync_all', fake_sync)
+    worker = threading.Thread(target=sync.sync_background)
+    worker.start()
+    try:
+        assert started.wait(timeout=5)
+        assert sync.get_sync_status()['current'] == 1
+        assert sync.get_sync_status()['state'] == 'running'
+        assert sync.sync_background() == {'skipped': True}
+        assert len(calls) == 1
+    finally:
+        release.set()
+        worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert sync.get_sync_status()['state'] == 'complete'
+    assert not sync._bg_sync_lock.locked()
+
+
+def test_background_sync_reports_failure_and_allows_retry(monkeypatch):
+    def failed(**kwargs):
+        raise RuntimeError('source unavailable')
+
+    monkeypatch.setattr(sync, 'sync_all', failed)
+    assert sync.sync_background() == {'error': 'source unavailable'}
+    assert sync.get_sync_status()['state'] == 'failed'
+    assert not sync._bg_sync_lock.locked()
+    monkeypatch.setattr(sync, 'sync_all', lambda **kwargs: {'errors': []})
+    sync.sync_background()
+    assert sync.get_sync_status()['state'] == 'complete'
